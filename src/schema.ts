@@ -29,7 +29,7 @@ export const ConfigSchema: Schema<Config> = Schema.object({
     .description('每天定时推送的整点小时。'),
   pushTargets: Schema.array(Schema.object({
     name: Schema.string().default('').description('备注'),
-    platform: Schema.string().default('qq').description('平台'),
+    platform: Schema.string().default('onebot').description('平台'),
     selfId: Schema.string().default('').description('机器人'),
     channelId: Schema.string().description('群/频道'),
     guildId: Schema.string().default('').description('Guild'),

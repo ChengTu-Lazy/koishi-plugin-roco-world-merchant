@@ -32,16 +32,30 @@ export async function apply(ctx: Context, config: PluginConfig) {
 
   let cancelNextPush: (() => void) | null = null
 
+  function getPlatformAliases(platform: string) {
+    const normalized = platform.trim().toLowerCase()
+    const aliases = new Set([normalized])
+    if (normalized === 'qq' || normalized === 'onebot') {
+      aliases.add('qq')
+      aliases.add('onebot')
+    }
+    return aliases
+  }
+
+  function matchPlatform(botPlatform: string, targetPlatform: string) {
+    return getPlatformAliases(targetPlatform).has(botPlatform.trim().toLowerCase())
+  }
+
   function resolvePushBot(target: PluginConfig['pushTargets'][number]) {
     const requestedSelfId = target.selfId?.trim()
     const exactBot = requestedSelfId
-      ? ctx.bots.find(item => item.platform === target.platform && item.selfId === requestedSelfId)
+      ? ctx.bots.find(item => matchPlatform(item.platform, target.platform) && item.selfId === requestedSelfId)
       : null
     if (exactBot) {
       return exactBot
     }
 
-    const samePlatformBots = ctx.bots.filter(item => item.platform === target.platform)
+    const samePlatformBots = ctx.bots.filter(item => matchPlatform(item.platform, target.platform))
     if (samePlatformBots.length === 1) {
       const fallbackBot = samePlatformBots[0]
       const reason = requestedSelfId
