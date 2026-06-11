@@ -4,11 +4,22 @@
   "version": "0.1.0",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
+  "homepage": "https://github.com/ChengTu-Lazy/koishi-plugin-roco-world-merchant#readme",
+  "bugs": {
+    "url": "https://github.com/ChengTu-Lazy/koishi-plugin-roco-world-merchant/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChengTu-Lazy/koishi-plugin-roco-world-merchant.git"
+  },
   "files": [
     "lib",
     "dist"
   ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "koishi",
     "plugin",
