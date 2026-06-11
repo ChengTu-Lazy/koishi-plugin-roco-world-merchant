@@ -30,6 +30,9 @@
   "peerDependencies": {
     "koishi": "^4.17.9"
   },
+  "dependencies": {
+    "sharp": "^0.35.0"
+  },
   "devDependencies": {
     "esbuild": "^0.18.20",
     "esbuild-register": "npm:@shigma/esbuild-register@^1.1.1",

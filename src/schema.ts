@@ -28,15 +28,15 @@ export const ConfigSchema: Schema<Config> = Schema.object({
     .role('table')
     .description('每天定时推送的整点小时。'),
   pushTargets: Schema.array(Schema.object({
-    name: Schema.string().default('').description('目标备注，可留空。'),
-    platform: Schema.string().default('qq').description('机器人平台，例如 qq。'),
-    selfId: Schema.string().description('负责发送消息的机器人 selfId。'),
-    channelId: Schema.string().description('目标群号或频道 ID。'),
-    guildId: Schema.string().default('').description('部分平台发送频道消息时需要，可留空。'),
+    name: Schema.string().default('').description('备注'),
+    platform: Schema.string().default('qq').description('平台'),
+    selfId: Schema.string().default('').description('机器人'),
+    channelId: Schema.string().description('群/频道'),
+    guildId: Schema.string().default('').description('Guild'),
   }))
     .default([])
     .role('table')
-    .description('主动推送的群或频道列表。'),
+    .description('推送目标列表，机器人列留空时会自动选当前平台唯一在线 bot。'),
   requestTimeout: Schema.number().role('ms').default(15000).description('接口请求超时。'),
   pushOnStartupIfMissed: Schema.boolean().default(true).description('机器人在推送点附近重启时，是否自动补推一次。'),
   startupCatchupWindowMinutes: Schema.number().default(30).description('允许补推的启动窗口分钟数。'),

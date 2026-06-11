@@ -1,4 +1,5 @@
 import { Context, Logger } from 'koishi'
+import sharp from 'sharp'
 
 import { createCacheEntry, getUsableCache, loadState, persistState } from '../cache'
 import { IMAGE_RENDER_VERSION } from '../constants'
@@ -132,24 +133,35 @@ export class MerchantStore {
     }
 
     let imageBuffer: Buffer | null = null
-    let mimeType = 'image/svg+xml'
+    let mimeType = 'image/png'
 
     if (entry.source === 'xianyuw' && hasBackupSource(this.options.config)) {
       try {
         imageBuffer = await fetchBackupImageData(this.options.ctx, this.options.config)
         mimeType = 'image/png'
       } catch (error) {
-        this.options.logger.warn(`备用图片获取失败，改用 SVG 文本图：${formatError(error)}`)
+        this.options.logger.warn(`备用图片获取失败，改用卡片 PNG 渲染：${formatError(error)}`)
       }
     }
 
     if (!imageBuffer) {
       const itemIcons = await this.loadItemIcons(entry)
-      imageBuffer = Buffer.from(
-        renderSvgImage(entry.data, entry.source, this.options.config.timezoneOffset, itemIcons),
-        'utf8',
-      )
-      mimeType = 'image/svg+xml'
+      const svg = renderSvgImage(entry.data, entry.source, this.options.config.timezoneOffset, itemIcons)
+
+      try {
+        imageBuffer = await sharp(Buffer.from(svg, 'utf8'), { density: 192 })
+          .png()
+          .toBuffer()
+        mimeType = 'image/png'
+      } catch (error) {
+        this.options.logger.warn(`卡片图片渲染失败，改用纯文字消息：${formatError(error)}`)
+        entry.imageBase64 = undefined
+        entry.imageMimeType = undefined
+        entry.imageVersion = undefined
+        this.state.cache = entry
+        await this.persist()
+        return entry
+      }
     }
 
     entry.imageBase64 = imageBuffer.toString('base64')

@@ -32,6 +32,39 @@ export async function apply(ctx: Context, config: PluginConfig) {
 
   let cancelNextPush: (() => void) | null = null
 
+  function resolvePushBot(target: PluginConfig['pushTargets'][number]) {
+    const requestedSelfId = target.selfId?.trim()
+    const exactBot = requestedSelfId
+      ? ctx.bots.find(item => item.platform === target.platform && item.selfId === requestedSelfId)
+      : null
+    if (exactBot) {
+      return exactBot
+    }
+
+    const samePlatformBots = ctx.bots.filter(item => item.platform === target.platform)
+    if (samePlatformBots.length === 1) {
+      const fallbackBot = samePlatformBots[0]
+      const reason = requestedSelfId
+        ? `未找到机器人 ${target.platform}:${requestedSelfId}`
+        : `未填写 ${target.platform} 平台的 selfId`
+      logger.warn(`${reason}，已自动回退到唯一在线机器人 ${fallbackBot.platform}:${fallbackBot.selfId}`)
+      return fallbackBot
+    }
+
+    if (!samePlatformBots.length) {
+      if (!requestedSelfId) {
+        throw new Error(`未填写 ${target.platform} 平台的 selfId，且当前平台没有在线机器人`)
+      }
+      throw new Error(`未找到机器人 ${target.platform}:${requestedSelfId}，当前平台没有在线机器人`)
+    }
+
+    const availableSelfIds = samePlatformBots.map(item => item.selfId).join(', ')
+    if (!requestedSelfId) {
+      throw new Error(`未填写 ${target.platform} 平台的 selfId，当前可用 selfId：${availableSelfIds}`)
+    }
+    throw new Error(`未找到机器人 ${target.platform}:${requestedSelfId}，当前可用 selfId：${availableSelfIds}`)
+  }
+
   async function handleManualQuery(forceRefresh: boolean) {
     const result = await store.getCache(needImageByDefault, forceRefresh)
     if (!result.entry) {
@@ -85,11 +118,7 @@ export async function apply(ctx: Context, config: PluginConfig) {
 
     for (const target of config.pushTargets) {
       try {
-        const bot = ctx.bots.find(item => item.platform === target.platform && item.selfId === target.selfId)
-        if (!bot) {
-          throw new Error(`未找到机器人 ${target.platform}:${target.selfId}`)
-        }
-
+        const bot = resolvePushBot(target)
         await bot.sendMessage(target.channelId, message, target.guildId || undefined)
         successCount += 1
       } catch (error) {
