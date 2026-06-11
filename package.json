@@ -1,0 +1,46 @@
+{
+  "name": "koishi-plugin-roco-world-merchant",
+  "description": "推送洛克王国世界远行商人数据，支持定时群推送与轮次缓存",
+  "version": "0.1.0",
+  "main": "lib/index.js",
+  "typings": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "dist"
+  ],
+  "license": "MIT",
+  "keywords": [
+    "koishi",
+    "plugin",
+    "roco",
+    "world",
+    "merchant"
+  ],
+  "peerDependencies": {
+    "koishi": "^4.17.9"
+  },
+  "devDependencies": {
+    "esbuild": "^0.18.20",
+    "esbuild-register": "npm:@shigma/esbuild-register@^1.1.1",
+    "koishi": "^4.18.3",
+    "typescript": "^5.4.3",
+    "yakumo": "^1.0.0-beta.16",
+    "yakumo-esbuild": "^1.0.0-beta.6",
+    "yakumo-tsc": "^1.0.0-beta.4",
+    "yml-register": "^1.2.5"
+  },
+  "koishi": {
+    "description": {
+      "zh": "推送洛克王国世界远行商人数据，支持定时群推送与轮次缓存"
+    },
+    "service": {
+      "required": [
+        "http"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "yakumo build",
+    "prepublishOnly": "npm run build"
+  }
+}
