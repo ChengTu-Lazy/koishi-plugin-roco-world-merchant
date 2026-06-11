@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-roco-world-merchant",
   "description": "推送洛克王国世界远行商人数据，支持定时群推送与轮次缓存",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "homepage": "https://github.com/ChengTu-Lazy/koishi-plugin-roco-world-merchant#readme",

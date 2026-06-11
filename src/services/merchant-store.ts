@@ -8,6 +8,7 @@ import { fetchPrimaryHtml, parsePrimaryHtml } from '../sources/onebiji'
 import { fetchBackupImageData, fetchBackupJsonData, hasBackupSource } from '../sources/xianyuw'
 import { CacheEntry, CacheResult, Config, PersistedState } from '../types'
 import { formatError } from '../utils/error'
+import { isPngBase64 } from '../utils/image'
 
 export interface MerchantStoreOptions {
   ctx: Context
@@ -128,7 +129,12 @@ export class MerchantStore {
   }
 
   private async ensureImage(entry: CacheEntry) {
-    if (entry.imageBase64 && entry.imageVersion === IMAGE_RENDER_VERSION) {
+    if (
+      entry.imageBase64
+      && entry.imageVersion === IMAGE_RENDER_VERSION
+      && entry.imageMimeType === 'image/png'
+      && isPngBase64(entry.imageBase64)
+    ) {
       return entry
     }
 

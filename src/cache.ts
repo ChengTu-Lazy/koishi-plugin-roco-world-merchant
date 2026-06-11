@@ -7,6 +7,7 @@ import { IMAGE_RENDER_VERSION, MINUTE } from './constants'
 import { CacheEntry, MerchantData, PersistedState, SourceName } from './types'
 import { formatDateOnly, getNextScheduleTime } from './utils/time'
 import { formatError } from './utils/error'
+import { isPngBase64 } from './utils/image'
 import { normalizeTimestampMs } from './utils/parse'
 
 export async function loadState(file: string, logger: Logger) {
@@ -59,7 +60,10 @@ export function createCacheEntry(
     : fallbackExpiry
 
   const sameSlot = previous?.slotKey === slotKey
-  const canReuseImage = sameSlot && previous?.imageVersion === IMAGE_RENDER_VERSION
+  const canReuseImage = sameSlot
+    && previous?.imageVersion === IMAGE_RENDER_VERSION
+    && previous?.imageMimeType === 'image/png'
+    && isPngBase64(previous?.imageBase64)
   return {
     slotKey,
     expiresAt,

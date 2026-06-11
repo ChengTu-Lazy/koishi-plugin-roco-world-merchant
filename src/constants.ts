@@ -5,4 +5,4 @@ export const BACKUP_SOURCE_URL = 'https://apii.xianyuw.cn/api/v1/rocom-merchant'
 export const HOUR = 60 * 60 * 1000
 export const MINUTE = 60 * 1000
 
-export const IMAGE_RENDER_VERSION = '2'
+export const IMAGE_RENDER_VERSION = '3'
