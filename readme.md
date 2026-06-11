@@ -19,7 +19,7 @@
 - 同轮次内优先使用缓存，避免高频请求
 - 缓存落盘到 `data/roco-world-merchant/cache.json`
 - 主源解析模块化拆分，方便后续单独维护数据源、缓存和渲染逻辑
-- SVG 主图会尽量内嵌商品图标，避免客户端丢失外链图片
+- 卡片图片会尽量内嵌商品图标，并优先以 PNG 形式发送，兼容 QQ 等客户端
 
 ## 安装
 
@@ -36,7 +36,7 @@
 - `timezoneOffset`: 默认 `8`
 - `pushTargets`: 主动推送目标列表
 - `platform`: 机器人平台，例如 `qq`
-- `selfId`: 用于发消息的机器人 ID
+- `selfId`: 用于发消息的机器人 ID，可留空；留空时会自动选择当前平台唯一在线 bot
 - `channelId`: 群号或频道 ID
 - `guildId`: 某些平台发送频道消息时需要，可留空
 
@@ -67,7 +67,7 @@
 - `src/services/merchant-store.ts`: 缓存、主备源切换、图片确保逻辑
 - `src/sources/onebiji.ts`: onebiji 主源抓取与解析
 - `src/sources/xianyuw.ts`: 咸鱼备用源接口封装
-- `src/render/`: 文本与 SVG 图片渲染
+- `src/render/`: 文本与卡片图片渲染
 - `src/utils/`: 时间、HTML、数值解析等基础工具
 
 ## 页面改版兼容性说明
