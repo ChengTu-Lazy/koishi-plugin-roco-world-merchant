@@ -51,7 +51,7 @@ export class MerchantStore {
     }
 
     try {
-      const entry = await this.refreshCache(requireImage)
+      const entry = await this.refreshCache(requireImage, forceRefresh)
       return {
         entry,
         origin: 'live',
@@ -79,10 +79,10 @@ export class MerchantStore {
     }
   }
 
-  private async refreshCache(requireImage: boolean) {
+  private async refreshCache(requireImage: boolean, forceRefresh: boolean) {
     if (!this.refreshPromise) {
       this.refreshPromise = (async () => {
-        const entry = await this.fetchPreferredEntry()
+        const entry = await this.fetchPreferredEntry(forceRefresh)
         this.state.cache = entry
         await this.persist()
         return entry
@@ -98,14 +98,15 @@ export class MerchantStore {
     return entry
   }
 
-  private async fetchPreferredEntry() {
+  private async fetchPreferredEntry(forceRefresh: boolean) {
     const { ctx, config, logger, scheduleHours } = this.options
     const errors: string[] = []
+    const previous = forceRefresh ? undefined : this.state.cache
 
     try {
       const html = await fetchPrimaryHtml(ctx, config)
       const data = parsePrimaryHtml(html, config.timezoneOffset)
-      return createCacheEntry(data, 'onebiji', this.state.cache, scheduleHours, config.timezoneOffset)
+      return createCacheEntry(data, 'onebiji', previous, scheduleHours, config.timezoneOffset)
     } catch (error) {
       const message = `主数据源 onebiji 失败：${formatError(error)}`
       errors.push(message)
@@ -115,7 +116,7 @@ export class MerchantStore {
     if (hasBackupSource(config)) {
       try {
         const data = await fetchBackupJsonData(ctx, config)
-        return createCacheEntry(data, 'xianyuw', this.state.cache, scheduleHours, config.timezoneOffset)
+        return createCacheEntry(data, 'xianyuw', previous, scheduleHours, config.timezoneOffset)
       } catch (error) {
         const message = `备用数据源咸鱼接口失败：${formatError(error)}`
         errors.push(message)
@@ -152,7 +153,13 @@ export class MerchantStore {
 
     if (!imageBuffer) {
       const itemIcons = await this.loadItemIcons(entry)
-      const svg = renderSvgImage(entry.data, entry.source, this.options.config.timezoneOffset, itemIcons)
+      const svg = renderSvgImage(
+        entry.data,
+        entry.source,
+        this.options.config.timezoneOffset,
+        entry.fetchedAt,
+        itemIcons,
+      )
 
       try {
         imageBuffer = await sharp(Buffer.from(svg, 'utf8'), { density: 192 })

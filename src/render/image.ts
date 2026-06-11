@@ -7,6 +7,7 @@ export function renderSvgImage(
   data: MerchantData,
   source: SourceName,
   timezoneOffset: number,
+  fetchedAt: Date | number | string,
   itemIcons: ItemIconMap = {},
 ) {
   const items = Array.isArray(data.items) ? data.items : []
@@ -23,7 +24,7 @@ export function renderSvgImage(
   content.push(`<text x="40" y="52" font-size="28" font-family="Microsoft YaHei, Arial" fill="#ffffff" font-weight="700">${escapeXml(data.merchant_name || '远行商人')}</text>`)
   content.push(`<text x="40" y="88" font-size="16" font-family="Microsoft YaHei, Arial" fill="#eaf4df">${escapeXml(data.subtitle || '')}</text>`)
   content.push(`<text x="520" y="52" font-size="16" font-family="Microsoft YaHei, Arial" fill="#eaf4df">数据源：${escapeXml(formatSource(source))}</text>`)
-  content.push(`<text x="520" y="82" font-size="16" font-family="Microsoft YaHei, Arial" fill="#eaf4df">抓取时间：${escapeXml(formatDateTime(data.fetched_at || Date.now(), timezoneOffset))}</text>`)
+  content.push(`<text x="520" y="82" font-size="16" font-family="Microsoft YaHei, Arial" fill="#eaf4df">抓取时间：${escapeXml(formatDateTime(fetchedAt, timezoneOffset))}</text>`)
 
   if (data.round) {
     const roundText = [data.round.label, data.round.status ? `状态：${data.round.status}` : '', data.round.countdown ? `倒计时：${data.round.countdown}` : '']

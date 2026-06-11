@@ -23,7 +23,7 @@ export function buildText(entry: CacheEntry, origin: CacheResult['origin'], warn
     }
   }
 
-  lines.push(`抓取时间：${formatDateTime(data.fetched_at || entry.fetchedAt, timezoneOffset)}`)
+  lines.push(`抓取时间：${formatDateTime(entry.fetchedAt, timezoneOffset)}`)
   lines.push(`缓存有效至：${formatDateTime(entry.expiresAt, timezoneOffset)}`)
 
   if (warning) {
