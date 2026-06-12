@@ -1,21 +1,19 @@
-name: npm-publish
+name: Publish Package to npm
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-  release:
-    types:
-      - published
 
-concurrency:
-  group: npm-publish-${{ github.ref }}
-  cancel-in-progress: false
+permissions:
+  contents: write
+  id-token: write
 
 jobs:
   publish:
+    name: Build and publish
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -23,17 +21,37 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
           package-manager-cache: false
 
       - name: Install dependencies
         run: npm install
 
-      - name: Build package
+      - name: Build
         run: npm run build
+
+      - name: Verify packed files
+        run: npm run verify:pack
+
+      - name: Read package version
+        id: package-version
+        shell: bash
+        run: echo "version=$(node -p 'require(\"./package.json\").version')" >> "$GITHUB_OUTPUT"
 
       - name: Publish to npm
         run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.package-version.outputs.version }}
+          name: v${{ steps.package-version.outputs.version }}
+          body: |
+            ## v${{ steps.package-version.outputs.version }}
+
+            - 修复 CI 打包时缺少 `lib/index.js` 导致插件安装后无法加载的问题。
+            - 将自动发布流程调整为推送到 `main` 后自动构建、校验并发布到 npm。
+            - 增加 npm 包内容校验，发布前强制检查 `main` 与 `typings` 文件已被正确打包。

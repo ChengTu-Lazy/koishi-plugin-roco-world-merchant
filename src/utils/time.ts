@@ -129,8 +129,17 @@ export function formatCountdown(diffMs: number) {
   return `${seconds}秒`
 }
 
-export function parseHourMinute(value: string) {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim())
+export function parseHourMinute(value: unknown) {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+
+  const match = /^(\d{1,2}):(\d{2})$/.exec(trimmed)
   if (!match) return null
 
   const hour = Number(match[1])
