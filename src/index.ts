@@ -163,7 +163,7 @@ export async function apply(ctx: Context, config: PluginConfig) {
       return
     }
 
-    const result = await store.getCache(needImageByDefault, false)
+    const result = await store.getCache(needImageByDefault, true)
     if (!result.entry) {
       logger.warn(`未获取到可推送数据：${result.warning || 'empty result'}`)
       return
