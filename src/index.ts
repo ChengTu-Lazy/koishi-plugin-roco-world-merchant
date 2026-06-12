@@ -1,16 +1,18 @@
 import { resolve } from 'node:path'
 
-import { Context, Logger } from 'koishi'
+import { Context, Logger, h } from 'koishi'
 
+import { DEFAULT_WATCH_ITEMS } from './constants'
 import { ConfigSchema } from './schema'
 import { buildMessage } from './render/message'
 import { MerchantStore } from './services/merchant-store'
-import { Config as PluginConfig } from './types'
-import { getLastScheduleTime, getNextScheduleTime, formatDateTime, formatScheduleKey, normalizeScheduleHours } from './utils/time'
+import { CacheEntry, Config as PluginConfig, PushTarget } from './types'
+import { formatDateTime, formatLegacyScheduleKey, formatScheduleKey, getLastScheduleTime, getNextScheduleTime, normalizeScheduleTimes } from './utils/time'
+import { buildWatchNotice, findWatchMatch } from './utils/watch'
 
 export const name = 'roco-world-merchant'
 export const inject = {
-  required: ['http'],
+  required: ['http', 'puppeteer'],
 }
 
 export const Config = ConfigSchema
@@ -18,19 +20,30 @@ export const Config = ConfigSchema
 export async function apply(ctx: Context, config: PluginConfig) {
   const logger = new Logger(name)
   const stateFile = resolve(ctx.baseDir, 'data', 'roco-world-merchant', 'cache.json')
-  const scheduleHours = normalizeScheduleHours(config.scheduleHours)
+  const scheduleTimes = normalizeScheduleTimes(config.scheduleTimes, config.scheduleHours)
+  const watchConfig = {
+    enabled: config.watch?.enabled ?? true,
+    items: config.watch?.items?.length ? config.watch.items : DEFAULT_WATCH_ITEMS,
+    mentionAllOnMatch: config.watch?.mentionAllOnMatch ?? true,
+  }
   const needImageByDefault = config.outputMode !== 'text'
   const store = new MerchantStore({
     ctx,
     logger,
     config,
     stateFile,
-    scheduleHours,
+    scheduleTimes,
   })
 
   await store.init()
 
   let cancelNextPush: (() => void) | null = null
+
+  function isScheduleAlreadyPushed(scheduleTime: Date) {
+    const currentKey = formatScheduleKey(scheduleTime, config.timezoneOffset)
+    const legacyKey = formatLegacyScheduleKey(scheduleTime, config.timezoneOffset)
+    return store.lastPushedScheduleKey === currentKey || store.lastPushedScheduleKey === legacyKey
+  }
 
   function getPlatformAliases(platform: string) {
     const normalized = platform.trim().toLowerCase()
@@ -46,7 +59,7 @@ export async function apply(ctx: Context, config: PluginConfig) {
     return getPlatformAliases(targetPlatform).has(botPlatform.trim().toLowerCase())
   }
 
-  function resolvePushBot(target: PluginConfig['pushTargets'][number]) {
+  function resolvePushBot(target: PushTarget) {
     const requestedSelfId = target.selfId?.trim()
     const exactBot = requestedSelfId
       ? ctx.bots.find(item => matchPlatform(item.platform, target.platform) && item.selfId === requestedSelfId)
@@ -79,37 +92,73 @@ export async function apply(ctx: Context, config: PluginConfig) {
     throw new Error(`未找到机器人 ${target.platform}:${requestedSelfId}，当前可用 selfId：${availableSelfIds}`)
   }
 
+  function buildOutputMessage(resultEntry: CacheEntry | null, origin: 'cache' | 'live' | 'stale', warning?: string) {
+    if (!resultEntry) {
+      return null
+    }
+
+    const baseMessage = buildMessage(
+      resultEntry,
+      origin,
+      warning,
+      config.timezoneOffset,
+      config.outputMode,
+    )
+
+    const watchMatch = watchConfig.enabled
+      ? findWatchMatch(resultEntry.data.items, watchConfig.items)
+      : null
+    const watchNotice = watchMatch ? buildWatchNotice(watchMatch) : ''
+    const finalMessage = watchNotice ? `${watchNotice}\n${baseMessage}` : baseMessage
+
+    return {
+      finalMessage,
+      watchMatch,
+    }
+  }
+
   async function handleManualQuery(forceRefresh: boolean) {
     const result = await store.getCache(needImageByDefault, forceRefresh)
     if (!result.entry) {
       return result.warning || '当前未获取到远行商人数据。'
     }
 
-    const message = buildMessage(
-      result.entry,
-      result.origin,
-      result.warning,
-      config.timezoneOffset,
-      config.outputMode,
-    )
-
+    const output = buildOutputMessage(result.entry, result.origin, result.warning)
+    const message = output?.finalMessage || ''
     if (!forceRefresh) {
       return message
     }
 
     const prefix = result.origin === 'stale'
-      ? '强制刷新失败，已回退到上一份缓存。'
+      ? '强制刷新失败，已尝试所有可用数据源并回退到旧缓存。'
       : '已强制刷新远行商人数据。'
 
     return `${prefix}\n${message}`
   }
 
-  async function doPush(scheduleKey: string, reason: 'schedule' | 'startup') {
+  async function sendTargetMessage(target: PushTarget, message: string, shouldMentionAll: boolean) {
+    const bot = resolvePushBot(target)
+    if (!shouldMentionAll) {
+      await bot.sendMessage(target.channelId, message, target.guildId || undefined)
+      return
+    }
+
+    const mentionAllMessage = `${h.at('all')}\n${message}`
+    try {
+      await bot.sendMessage(target.channelId, mentionAllMessage, target.guildId || undefined)
+    } catch (error) {
+      logger.warn(`关注物品命中但 @全体 发送失败，已回退普通消息：${target.platform}:${target.channelId} -> ${error instanceof Error ? error.message : String(error)}`)
+      await bot.sendMessage(target.channelId, message, target.guildId || undefined)
+    }
+  }
+
+  async function doPush(scheduleTime: Date, reason: 'schedule' | 'startup') {
     if (!config.pushTargets.length) {
       return
     }
 
-    if (store.lastPushedScheduleKey === scheduleKey) {
+    const scheduleKey = formatScheduleKey(scheduleTime, config.timezoneOffset)
+    if (isScheduleAlreadyPushed(scheduleTime)) {
       logger.info(`跳过重复推送：${scheduleKey}`)
       return
     }
@@ -120,20 +169,15 @@ export async function apply(ctx: Context, config: PluginConfig) {
       return
     }
 
-    const message = buildMessage(
-      result.entry,
-      result.origin,
-      result.warning,
-      config.timezoneOffset,
-      config.outputMode,
-    )
+    const output = buildOutputMessage(result.entry, result.origin, result.warning)
+    const message = output?.finalMessage || ''
+    const shouldMentionAll = Boolean(output?.watchMatch && watchConfig.enabled && watchConfig.mentionAllOnMatch)
     const errors: string[] = []
     let successCount = 0
 
     for (const target of config.pushTargets) {
       try {
-        const bot = resolvePushBot(target)
-        await bot.sendMessage(target.channelId, message, target.guildId || undefined)
+        await sendTargetMessage(target, message, shouldMentionAll)
         successCount += 1
       } catch (error) {
         const label = target.name || `${target.platform}:${target.selfId}:${target.channelId}`
@@ -159,7 +203,7 @@ export async function apply(ctx: Context, config: PluginConfig) {
   function scheduleNext() {
     cancelNextPush?.()
 
-    const nextTime = getNextScheduleTime(new Date(), scheduleHours, config.timezoneOffset)
+    const nextTime = getNextScheduleTime(new Date(), scheduleTimes, config.timezoneOffset)
     const delay = Math.max(1000, nextTime.getTime() - Date.now())
     const scheduleKey = formatScheduleKey(nextTime, config.timezoneOffset)
 
@@ -167,7 +211,7 @@ export async function apply(ctx: Context, config: PluginConfig) {
 
     cancelNextPush = ctx.setTimeout(async () => {
       try {
-        await doPush(scheduleKey, 'schedule')
+        await doPush(nextTime, 'schedule')
       } finally {
         scheduleNext()
       }
@@ -179,19 +223,19 @@ export async function apply(ctx: Context, config: PluginConfig) {
       return
     }
 
-    const lastSchedule = getLastScheduleTime(new Date(), scheduleHours, config.timezoneOffset)
+    const lastSchedule = getLastScheduleTime(new Date(), scheduleTimes, config.timezoneOffset)
     const scheduleKey = formatScheduleKey(lastSchedule, config.timezoneOffset)
     const age = Date.now() - lastSchedule.getTime()
     if (age > Math.max(1, config.startupCatchupWindowMinutes) * 60 * 1000) {
       return
     }
 
-    if (store.lastPushedScheduleKey === scheduleKey) {
+    if (isScheduleAlreadyPushed(lastSchedule)) {
       return
     }
 
     logger.info(`检测到启动补推窗口，准备补推：${scheduleKey}`)
-    await doPush(scheduleKey, 'startup')
+    await doPush(lastSchedule, 'startup')
   }
 
   ctx.on('ready', async () => {

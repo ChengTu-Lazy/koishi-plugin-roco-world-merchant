@@ -4,7 +4,7 @@ import { dirname } from 'node:path'
 import { Logger } from 'koishi'
 
 import { IMAGE_RENDER_VERSION, MINUTE } from './constants'
-import { CacheEntry, MerchantData, PersistedState, SourceName } from './types'
+import { CacheEntry, MerchantData, PersistedState, ScheduleTime, SourceName } from './types'
 import { formatDateOnly, getNextScheduleTime } from './utils/time'
 import { formatError } from './utils/error'
 import { isPngBase64 } from './utils/image'
@@ -38,7 +38,7 @@ export function createCacheEntry(
   data: MerchantData,
   source: SourceName,
   previous: CacheEntry | undefined,
-  scheduleHours: number[],
+  scheduleTimes: ScheduleTime[],
   timezoneOffset: number,
 ) {
   const now = Date.now()
@@ -54,7 +54,7 @@ export function createCacheEntry(
     ? `${Math.min(...startTimes)}-${Math.max(...endTimes)}`
     : `${source}-${data.subtitle || formatDateOnly(now, timezoneOffset)}-round-${data.round?.current ?? 'unknown'}`
 
-  const fallbackExpiry = getNextScheduleTime(new Date(now), scheduleHours, timezoneOffset).getTime()
+  const fallbackExpiry = getNextScheduleTime(new Date(now), scheduleTimes, timezoneOffset).getTime()
   const expiresAt = endTimes.length
     ? Math.max(now + MINUTE, Math.max(...endTimes))
     : fallbackExpiry

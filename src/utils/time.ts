@@ -1,41 +1,65 @@
-import { DEFAULT_SCHEDULE_HOURS, HOUR } from '../constants'
+import { DEFAULT_SCHEDULE_TIMES, HOUR } from '../constants'
+import { ScheduleTime } from '../types'
 
-export function normalizeScheduleHours(hours: number[]) {
-  const result = Array.from(new Set(
-    (Array.isArray(hours) ? hours : [])
+export function normalizeScheduleTimes(times?: string[], legacyHours?: number[]) {
+  const parsed = Array.isArray(times)
+    ? times
+      .map(parseHourMinute)
+      .filter((value): value is ScheduleTime => {
+        return Boolean(value) && value.hour >= 0 && value.hour <= 23 && value.minute >= 0 && value.minute <= 59
+      })
+    : []
+
+  const normalized = uniqueScheduleTimes(parsed)
+  if (normalized.length) {
+    return normalized
+  }
+
+  const legacy = Array.from(new Set(
+    (Array.isArray(legacyHours) ? legacyHours : [])
       .filter(value => Number.isInteger(value) && value >= 0 && value <= 23),
-  )).sort((a, b) => a - b)
+  ))
+    .sort((a, b) => a - b)
+    .map(hour => ({ hour, minute: 0 }))
 
-  return result.length ? result : DEFAULT_SCHEDULE_HOURS
+  if (legacy.length) {
+    return legacy
+  }
+
+  return DEFAULT_SCHEDULE_TIMES
+    .map(parseHourMinute)
+    .filter((value): value is ScheduleTime => Boolean(value))
 }
 
-export function getNextScheduleTime(now: Date, scheduleHours: number[], timezoneOffset: number) {
+export function getNextScheduleTime(now: Date, scheduleTimes: ScheduleTime[], timezoneOffset: number) {
   const candidates = [
-    ...getScheduleTimesForDate(now, scheduleHours, timezoneOffset),
-    ...getScheduleTimesForDate(new Date(now.getTime() + 24 * HOUR), scheduleHours, timezoneOffset),
+    ...getScheduleTimesForDate(now, scheduleTimes, timezoneOffset),
+    ...getScheduleTimesForDate(new Date(now.getTime() + 24 * HOUR), scheduleTimes, timezoneOffset),
   ].sort((a, b) => a.getTime() - b.getTime())
 
   const next = candidates.find(candidate => candidate.getTime() > now.getTime() + 1000)
   return next || new Date(now.getTime() + HOUR)
 }
 
-export function getLastScheduleTime(now: Date, scheduleHours: number[], timezoneOffset: number) {
+export function getLastScheduleTime(now: Date, scheduleTimes: ScheduleTime[], timezoneOffset: number) {
   const candidates = [
-    ...getScheduleTimesForDate(new Date(now.getTime() - 24 * HOUR), scheduleHours, timezoneOffset),
-    ...getScheduleTimesForDate(now, scheduleHours, timezoneOffset),
+    ...getScheduleTimesForDate(new Date(now.getTime() - 24 * HOUR), scheduleTimes, timezoneOffset),
+    ...getScheduleTimesForDate(now, scheduleTimes, timezoneOffset),
   ].sort((a, b) => a.getTime() - b.getTime())
 
   const last = [...candidates].reverse().find(candidate => candidate.getTime() <= now.getTime())
   return last || new Date(now.getTime() - HOUR)
 }
 
-export function getScheduleTimesForDate(baseDate: Date, scheduleHours: number[], timezoneOffset: number) {
+export function getScheduleTimesForDate(baseDate: Date, scheduleTimes: ScheduleTime[], timezoneOffset: number) {
   const zoned = shiftToTimezone(baseDate, timezoneOffset)
   const year = zoned.getUTCFullYear()
   const month = zoned.getUTCMonth()
   const day = zoned.getUTCDate()
 
-  return scheduleHours.map(hour => createTimezoneDate(year, month, day, hour, 0, timezoneOffset))
+  return scheduleTimes.map(({ hour, minute }) => {
+    return createTimezoneDate(year, month, day, hour, minute, timezoneOffset)
+  })
 }
 
 export function createTimezoneDate(
@@ -57,6 +81,17 @@ export function shiftToTimezone(value: Date | number | string, timezoneOffset: n
 }
 
 export function formatScheduleKey(value: Date | number | string, timezoneOffset: number) {
+  const zoned = shiftToTimezone(value, timezoneOffset)
+  return [
+    zoned.getUTCFullYear(),
+    pad(zoned.getUTCMonth() + 1),
+    pad(zoned.getUTCDate()),
+    pad(zoned.getUTCHours()),
+    pad(zoned.getUTCMinutes()),
+  ].join('-')
+}
+
+export function formatLegacyScheduleKey(value: Date | number | string, timezoneOffset: number) {
   const zoned = shiftToTimezone(value, timezoneOffset)
   return [
     zoned.getUTCFullYear(),
@@ -129,6 +164,21 @@ export function buildSlotWindow(baseValue: Date | number | string, start: string
     startTime: startDate.getTime(),
     endTime: endDate.getTime(),
   }
+}
+
+function uniqueScheduleTimes(times: ScheduleTime[]) {
+  const map = new Map<string, ScheduleTime>()
+  for (const time of times) {
+    map.set(formatClock(time.hour, time.minute), time)
+  }
+  return [...map.values()].sort((a, b) => {
+    if (a.hour !== b.hour) return a.hour - b.hour
+    return a.minute - b.minute
+  })
+}
+
+function formatClock(hour: number, minute: number) {
+  return `${pad(hour)}:${pad(minute)}`
 }
 
 function pad(value: number) {

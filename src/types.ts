@@ -1,6 +1,11 @@
 export type OutputMode = 'text' | 'image' | 'both'
 export type SourceName = 'onebiji' | 'xianyuw'
 
+export interface ScheduleTime {
+  hour: number
+  minute: number
+}
+
 export interface PushTarget {
   name?: string
   platform: string
@@ -9,8 +14,15 @@ export interface PushTarget {
   guildId?: string
 }
 
+export interface WatchConfig {
+  enabled: boolean
+  items: string[]
+  mentionAllOnMatch: boolean
+}
+
 export interface Config {
   primarySourceUrl: string
+  preferredSource: SourceName
   apiKey: string
   apiBaseUrl: string
   refreshValue: string
@@ -18,11 +30,13 @@ export interface Config {
   commandName: string
   commandAliases: string[]
   timezoneOffset: number
-  scheduleHours: number[]
+  scheduleTimes?: string[]
+  scheduleHours?: number[]
   pushTargets: PushTarget[]
   requestTimeout: number
   pushOnStartupIfMissed: boolean
   startupCatchupWindowMinutes: number
+  watch: WatchConfig
 }
 
 export interface MerchantRound {
@@ -75,6 +89,7 @@ export interface CacheEntry {
 
 export interface PersistedState {
   cache?: CacheEntry
+  sourcePreference?: SourceName
   lastPushedScheduleKey?: string
   lastPushedAt?: number
 }

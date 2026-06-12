@@ -1,12 +1,12 @@
 import { Context, Logger } from 'koishi'
-import sharp from 'sharp'
 
 import { createCacheEntry, getUsableCache, loadState, persistState } from '../cache'
 import { IMAGE_RENDER_VERSION } from '../constants'
 import { ItemIconMap, renderSvgImage } from '../render/image'
+import { renderPngWithPuppeteer } from '../render/puppeteer'
 import { fetchPrimaryHtml, parsePrimaryHtml } from '../sources/onebiji'
 import { fetchBackupImageData, fetchBackupJsonData, hasBackupSource } from '../sources/xianyuw'
-import { CacheEntry, CacheResult, Config, PersistedState } from '../types'
+import { CacheEntry, CacheResult, Config, MerchantData, PersistedState, ScheduleTime, SourceName } from '../types'
 import { formatError } from '../utils/error'
 import { isPngBase64 } from '../utils/image'
 
@@ -15,7 +15,13 @@ export interface MerchantStoreOptions {
   logger: Logger
   config: Config
   stateFile: string
-  scheduleHours: number[]
+  scheduleTimes: ScheduleTime[]
+}
+
+interface SourceAttempt {
+  source: SourceName
+  label: string
+  fetch: () => Promise<MerchantData>
 }
 
 export class MerchantStore {
@@ -39,7 +45,7 @@ export class MerchantStore {
   }
 
   async getCache(requireImage: boolean, forceRefresh: boolean): Promise<CacheResult> {
-    const cached = !forceRefresh ? getUsableCache(this.state) : null
+    const cached = !forceRefresh ? this.getUsableCacheForPreference() : null
     if (cached) {
       if (requireImage) {
         await this.ensureImage(cached)
@@ -67,14 +73,14 @@ export class MerchantStore {
         return {
           entry: this.state.cache,
           origin: 'stale',
-          warning: `主源与备用源都失败，已回退到上一份缓存：${message}`,
+          warning: `所有可用数据源请求均失败，已回退到旧缓存：${message}`,
         }
       }
 
       return {
         entry: null,
         origin: 'live',
-        warning: `主源与备用源都失败：${message}`,
+        warning: `所有可用数据源请求均失败：${message}`,
       }
     }
   }
@@ -82,8 +88,10 @@ export class MerchantStore {
   private async refreshCache(requireImage: boolean, forceRefresh: boolean) {
     if (!this.refreshPromise) {
       this.refreshPromise = (async () => {
+        const preferredSource = this.getPreferredSource()
         const entry = await this.fetchPreferredEntry(forceRefresh)
         this.state.cache = entry
+        this.state.sourcePreference = preferredSource
         await this.persist()
         return entry
       })().finally(() => {
@@ -99,34 +107,79 @@ export class MerchantStore {
   }
 
   private async fetchPreferredEntry(forceRefresh: boolean) {
-    const { ctx, config, logger, scheduleHours } = this.options
+    const { config, logger, scheduleTimes } = this.options
     const errors: string[] = []
     const previous = forceRefresh ? undefined : this.state.cache
+    const attempts = this.getSourceAttempts(this.getPreferredSource())
 
-    try {
-      const html = await fetchPrimaryHtml(ctx, config)
-      const data = parsePrimaryHtml(html, config.timezoneOffset)
-      return createCacheEntry(data, 'onebiji', previous, scheduleHours, config.timezoneOffset)
-    } catch (error) {
-      const message = `主数据源 onebiji 失败：${formatError(error)}`
-      errors.push(message)
-      logger.warn(message)
-    }
-
-    if (hasBackupSource(config)) {
+    for (const attempt of attempts) {
       try {
-        const data = await fetchBackupJsonData(ctx, config)
-        return createCacheEntry(data, 'xianyuw', previous, scheduleHours, config.timezoneOffset)
+        const data = await attempt.fetch()
+        return createCacheEntry(data, attempt.source, previous, scheduleTimes, config.timezoneOffset)
       } catch (error) {
-        const message = `备用数据源咸鱼接口失败：${formatError(error)}`
+        const message = `${attempt.label}失败：${formatError(error)}`
         errors.push(message)
         logger.warn(message)
       }
-    } else {
-      errors.push('未配置咸鱼备用数据源 apiKey')
+    }
+
+    if (!hasBackupSource(config)) {
+      errors.push('备用数据源咸鱼未配置 apiKey，无法切换到备用源')
     }
 
     throw new Error(errors.join('；'))
+  }
+
+  private getSourceAttempts(preferredSource: SourceName): SourceAttempt[] {
+    const { ctx, config, logger } = this.options
+    const order = [preferredSource, getAlternateSource(preferredSource)] as SourceName[]
+    const attempts: SourceAttempt[] = []
+
+    for (const source of order) {
+      if (source === 'onebiji') {
+        attempts.push({
+          source,
+          label: '主数据源 onebiji',
+          fetch: async () => {
+            const html = await fetchPrimaryHtml(ctx, config)
+            return parsePrimaryHtml(html, config.timezoneOffset)
+          },
+        })
+        continue
+      }
+
+      if (source === 'xianyuw' && hasBackupSource(config)) {
+        attempts.push({
+          source,
+          label: '备用数据源咸鱼',
+          fetch: async () => fetchBackupJsonData(ctx, config),
+        })
+      }
+    }
+
+    if (preferredSource === 'xianyuw' && !hasBackupSource(config)) {
+      logger.warn('当前默认数据源为咸鱼源，但未配置 apiKey，已自动回退到 onebiji 主源。')
+    }
+
+    return attempts
+  }
+
+  private getUsableCacheForPreference() {
+    const cached = getUsableCache(this.state)
+    if (!cached) {
+      return null
+    }
+
+    const cachedPreference = this.state.sourcePreference || cached.source
+    if (cachedPreference !== this.getPreferredSource()) {
+      return null
+    }
+
+    return cached
+  }
+
+  private getPreferredSource(): SourceName {
+    return this.options.config.preferredSource === 'xianyuw' ? 'xianyuw' : 'onebiji'
   }
 
   private async ensureImage(entry: CacheEntry) {
@@ -153,7 +206,7 @@ export class MerchantStore {
 
     if (!imageBuffer) {
       const itemIcons = await this.loadItemIcons(entry)
-      const svg = renderSvgImage(
+      const svgImage = renderSvgImage(
         entry.data,
         entry.source,
         this.options.config.timezoneOffset,
@@ -162,9 +215,7 @@ export class MerchantStore {
       )
 
       try {
-        imageBuffer = await sharp(Buffer.from(svg, 'utf8'), { density: 192 })
-          .png()
-          .toBuffer()
+        imageBuffer = await renderPngWithPuppeteer(this.options.ctx, svgImage)
         mimeType = 'image/png'
       } catch (error) {
         this.options.logger.warn(`卡片图片渲染失败，改用纯文字消息：${formatError(error)}`)
@@ -213,6 +264,10 @@ export class MerchantStore {
 
     return Object.fromEntries(iconEntries.filter(Boolean)) as ItemIconMap
   }
+}
+
+function getAlternateSource(source: SourceName): SourceName {
+  return source === 'onebiji' ? 'xianyuw' : 'onebiji'
 }
 
 function guessImageMimeType(url: string) {

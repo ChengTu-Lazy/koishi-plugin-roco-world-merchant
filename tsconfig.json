@@ -15,7 +15,8 @@
     "jsxImportSource": "@satorijs/element",
     "types": [
       "node",
-      "yml-register/types"
+      "yml-register/types",
+      "koishi-plugin-puppeteer"
     ]
   },
   "include": [

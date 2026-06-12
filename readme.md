@@ -7,38 +7,55 @@
 数据源策略：
 
 - 默认主数据源：`onebiji` 的免 key 页面
+- 支持通过 `preferredSource` 手动切换默认数据源到 `onebiji` 或 `xianyuw`
 - 备用数据源：咸鱼 API
-- 当主源失败时，才会回退到咸鱼接口
+- 主源请求失败后，会自动切换到备用源
+- 只有所有可用数据源都失败时，才会回退到旧缓存
 
 ## 功能
 
-- 每天 `08:00 / 12:00 / 16:00 / 20:00` 主动推送到配置的群或频道
+- 支持每天按分钟精度主动推送到配置的群或频道
 - 支持命令主动获取
 - 支持独立的强制刷新命令
 - 按当前轮次缓存结构化数据
 - 同轮次内优先使用缓存，避免高频请求
 - 缓存落盘到 `data/roco-world-merchant/cache.json`
-- 主源解析模块化拆分，方便后续单独维护数据源、缓存和渲染逻辑
+- 主源解析模块化拆分，便于后续单独维护数据源、缓存和渲染逻辑
 - 卡片图片会尽量内嵌商品图标，并优先以 PNG 形式发送，兼容 QQ 等客户端
+- 卡片 PNG 由 `puppeteer` 服务渲染，不再依赖 `sharp`
+- 支持关注物品匹配提醒，命中后可尝试 `@全体`
 
 ## 安装
 
-在 Koishi 插件市场搜索 `roco-world-merchant`，或者作为本地 workspace 插件直接启用。
+在 Koishi 插件市场搜索 `roco-world-merchant`，或作为本地 workspace 插件直接启用。
+
+启用本插件前，请先安装并启用 `puppeteer` 插件，因为本插件会直接依赖 `ctx.puppeteer` 服务来生成卡片 PNG。
+
+如果部署在 Ubuntu Server 等无桌面环境，只要系统内可用 Chrome / Chromium / Edge，并以 headless 方式启动即可。
 
 ## 配置说明
 
 - `primarySourceUrl`: onebiji 主数据源页面地址
+- `preferredSource`: 默认数据源，可选 `onebiji` 或 `xianyuw`
 - `apiKey`: 咸鱼备用数据源的 key，可留空
 - `apiBaseUrl`: 咸鱼备用数据源接口地址
 - `refreshValue`: 透传到咸鱼备用接口的 `refresh` 参数
 - `outputMode`: `text`、`image`、`both`
-- `scheduleHours`: 默认 `8, 12, 16, 20`
+- `scheduleTimes`: 每天定时推送的时间列表，格式为 `HH:mm`
 - `timezoneOffset`: 默认 `8`
 - `pushTargets`: 主动推送目标列表
 - `platform`: 机器人平台，默认 `onebot`
 - `selfId`: 用于发消息的机器人 ID，可留空；留空时会自动选择当前平台唯一在线 bot
 - `channelId`: 群号或频道 ID
 - `guildId`: 某些平台发送频道消息时需要，可留空
+- `watch.enabled`: 是否启用关注物品匹配
+- `watch.items`: 关注物品列表，默认预置 `国王球`、`棱镜球`、`镜面相框`、`炫彩蛋`、`首领血脉秘药`、`祝福项坠`
+- `watch.mentionAllOnMatch`: 命中关注物品时，推送前尝试 `@全体`；如果平台或权限不支持，会自动回退为普通消息
+
+兼容说明：
+
+- 旧配置里的 `scheduleHours` 仍可继续读取，并自动按 `HH:00` 处理
+- `platform` 会兼容 `onebot` 与旧配置里的 `qq` 写法
 
 ## 指令
 
@@ -55,23 +72,35 @@
 
 - 主源成功时，按当前轮次缓存解析结果
 - 同一轮次内的主动获取默认直接复用缓存
-- 只有缓存过期、没有缓存，或者显式使用 `-f` 时，才重新请求数据源
-- 主源失败且配置了 `apiKey` 时，会自动切换到咸鱼备用源
+- 只有缓存过期、没有缓存，或者显式使用 `-f` 时，才会重新请求数据源
+- 强制刷新时，会优先尝试当前配置的数据源，并在失败后自动切换到其他可用源
+- 切换 `preferredSource` 后，旧源缓存不会被继续直接复用，会按新源重新获取
+- 只有所有可用数据源都失败时，才会回退到旧缓存
 - `抓取时间` 显示的是插件本次真实请求时间，而不是页面内的服务器时间字段
 - 强制刷新会绕过同轮次旧卡片图复用，重新生成最新卡片图片
-- `platform` 会兼容 `onebot` 与旧配置里的 `qq` 写法，减少历史配置迁移成本
+
+## 关注物品提醒
+
+- 默认预置 6 个关注物品：`国王球`、`棱镜球`、`镜面相框`、`炫彩蛋`、`首领血脉秘药`、`祝福项坠`
+- 支持直接在配置里增删关注物品，支持用部分关键字进行宽松匹配
+- 命中后会在消息顶部增加 `【关注物品命中】...` 提示
+- 如果开启了 `watch.mentionAllOnMatch`，推送时会先尝试 `@全体`
+- 如果平台不支持或机器人没有 `@全体` 权限，会自动改为普通消息继续推送，不会因为提醒失败把整条消息丢掉
 
 ## 代码结构
 
 当前源码已经按职责拆分：
 
-- `src/index.ts`: Koishi 插件入口、命令注册、定时调度
+- `src/index.ts`: Koishi 插件入口、命令注册、定时调度、推送发送
 - `src/schema.ts`: 配置项 Schema
 - `src/services/merchant-store.ts`: 缓存、主备源切换、图片确保逻辑
 - `src/sources/onebiji.ts`: onebiji 主源抓取与解析
 - `src/sources/xianyuw.ts`: 咸鱼备用源接口封装
-- `src/render/`: 文本与卡片图片渲染
-- `src/utils/`: 时间、HTML、数值解析等基础工具
+- `src/render/image.ts`: SVG 卡片结构生成
+- `src/render/puppeteer.ts`: 基于 `ctx.puppeteer` 的 PNG 截图渲染
+- `src/render/message.ts`: 文本与图片消息拼装
+- `src/utils/time.ts`: 分钟级调度与时间工具
+- `src/utils/watch.ts`: 关注物品匹配与提醒文案工具
 
 ## 页面改版兼容性说明
 
@@ -85,6 +114,6 @@
 
 这意味着：
 
-- 如果只是 class 顺序、空白、局部样式、部分标签轻微调整，通常还能继续取到
+- 如果只是 class 顺序、空白、局部样式、部分标签轻微调整，通常还能继续取到数据
 - 如果关键字段整体被替换，例如 `show_x`、`shop_name`、`shop_price`、`data-time`、`showShopinfo(...)` 同时失效，主源解析仍可能失败
 - 主源失败且已配置 `apiKey` 时，插件会自动降级到咸鱼备用源
