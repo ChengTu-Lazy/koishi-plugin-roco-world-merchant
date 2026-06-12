@@ -34,23 +34,43 @@ jobs:
       - name: Verify packed files
         run: npm run verify:pack
 
-      - name: Read package version
-        id: package-version
+      - name: Read package metadata
+        id: package-meta
         shell: bash
-        run: echo "version=$(node -p 'require(\"./package.json\").version')" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+
+          if npm view "$PACKAGE_NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "npm_published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "npm_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if gh release view "v$VERSION" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "release_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_exists=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Publish to npm
+        if: steps.package-meta.outputs.npm_published != 'true'
         run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
+        if: steps.package-meta.outputs.release_exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.package-version.outputs.version }}
-          name: v${{ steps.package-version.outputs.version }}
+          tag_name: v${{ steps.package-meta.outputs.version }}
+          name: v${{ steps.package-meta.outputs.version }}
           body: |
-            ## v${{ steps.package-version.outputs.version }}
+            ## v${{ steps.package-meta.outputs.version }}
 
             - 修复 CI 打包时缺少 `lib/index.js` 导致插件安装后无法加载的问题。
             - 将自动发布流程调整为推送到 `main` 后自动构建、校验并发布到 npm。
