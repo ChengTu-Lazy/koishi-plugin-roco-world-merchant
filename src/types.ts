@@ -1,5 +1,5 @@
 export type OutputMode = 'text' | 'image' | 'both'
-export type SourceName = 'onebiji' | 'xianyuw'
+export type SourceName = 'onebiji' | 'arkmeng' | 'xianyuw'
 
 export interface ScheduleTime {
   hour: number

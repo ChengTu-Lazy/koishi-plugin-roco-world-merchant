@@ -4,6 +4,7 @@ import { createCacheEntry, getUsableCache, loadState, persistState } from '../ca
 import { IMAGE_RENDER_VERSION } from '../constants'
 import { ItemIconMap, renderSvgImage } from '../render/image'
 import { renderPngWithPuppeteer } from '../render/puppeteer'
+import { fetchArkmengMerchantData } from '../sources/arkmeng'
 import { fetchPrimaryHtml, parsePrimaryHtml } from '../sources/onebiji'
 import { fetchBackupImageData, fetchBackupJsonData, hasBackupSource } from '../sources/xianyuw'
 import { CacheEntry, CacheResult, Config, MerchantData, PersistedState, ScheduleTime, SourceName } from '../types'
@@ -132,7 +133,7 @@ export class MerchantStore {
 
   private getSourceAttempts(preferredSource: SourceName): SourceAttempt[] {
     const { ctx, config, logger } = this.options
-    const order = [preferredSource, getAlternateSource(preferredSource)] as SourceName[]
+    const order = getSourceOrder(preferredSource)
     const attempts: SourceAttempt[] = []
 
     for (const source of order) {
@@ -148,6 +149,15 @@ export class MerchantStore {
         continue
       }
 
+      if (source === 'arkmeng') {
+        attempts.push({
+          source,
+          label: '数据源 arkmeng 洛克万事屋',
+          fetch: async () => fetchArkmengMerchantData(ctx, config),
+        })
+        continue
+      }
+
       if (source === 'xianyuw' && hasBackupSource(config)) {
         attempts.push({
           source,
@@ -158,7 +168,7 @@ export class MerchantStore {
     }
 
     if (preferredSource === 'xianyuw' && !hasBackupSource(config)) {
-      logger.warn('当前默认数据源为咸鱼源，但未配置 apiKey，已自动回退到 onebiji 主源。')
+      logger.warn('当前默认数据源为咸鱼源，但未配置 apiKey，已自动跳过咸鱼源。')
     }
 
     return attempts
@@ -179,7 +189,11 @@ export class MerchantStore {
   }
 
   private getPreferredSource(): SourceName {
-    return this.options.config.preferredSource === 'xianyuw' ? 'xianyuw' : 'onebiji'
+    const source = this.options.config.preferredSource
+    if (source === 'xianyuw' || source === 'arkmeng') {
+      return source
+    }
+    return 'onebiji'
   }
 
   private async ensureImage(entry: CacheEntry) {
@@ -266,8 +280,14 @@ export class MerchantStore {
   }
 }
 
-function getAlternateSource(source: SourceName): SourceName {
-  return source === 'onebiji' ? 'xianyuw' : 'onebiji'
+function getSourceOrder(source: SourceName): SourceName[] {
+  if (source === 'arkmeng') {
+    return ['arkmeng', 'onebiji', 'xianyuw']
+  }
+  if (source === 'xianyuw') {
+    return ['xianyuw', 'arkmeng', 'onebiji']
+  }
+  return ['onebiji', 'arkmeng', 'xianyuw']
 }
 
 function guessImageMimeType(url: string) {

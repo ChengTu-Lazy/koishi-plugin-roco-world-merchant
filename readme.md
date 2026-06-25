@@ -7,9 +7,10 @@
 数据源策略：
 
 - 默认主数据源：`onebiji` 的免 key 页面
-- 支持通过 `preferredSource` 手动切换默认数据源到 `onebiji` 或 `xianyuw`
+- 新增免 key 数据源：`arkmeng` 洛克万事屋，接口提供截止时间，页面规则补全商品图标
+- 支持通过 `preferredSource` 手动切换默认数据源到 `onebiji`、`arkmeng` 或 `xianyuw`
 - 备用数据源：咸鱼 API
-- 主源请求失败后，会自动切换到备用源
+- 主源请求失败后，会自动切换到其他可用源
 - 只有所有可用数据源都失败时，才会回退到旧缓存
 
 ## 功能
@@ -36,7 +37,7 @@
 ## 配置说明
 
 - `primarySourceUrl`: onebiji 主数据源页面地址
-- `preferredSource`: 默认数据源，可选 `onebiji` 或 `xianyuw`
+- `preferredSource`: 默认数据源，可选 `onebiji`、`arkmeng` 或 `xianyuw`
 - `apiKey`: 咸鱼备用数据源的 key，可留空
 - `apiBaseUrl`: 咸鱼备用数据源接口地址
 - `refreshValue`: 透传到咸鱼备用接口的 `refresh` 参数
@@ -95,6 +96,7 @@
 - `src/schema.ts`: 配置项 Schema
 - `src/services/merchant-store.ts`: 缓存、主备源切换、图片确保逻辑
 - `src/sources/onebiji.ts`: onebiji 主源抓取与解析
+- `src/sources/arkmeng.ts`: 洛克万事屋接口抓取，并按页面图标规则补全商品图标
 - `src/sources/xianyuw.ts`: 咸鱼备用源接口封装
 - `src/render/image.ts`: SVG 卡片结构生成
 - `src/render/puppeteer.ts`: 基于 `ctx.puppeteer` 的 PNG 截图渲染
@@ -117,3 +119,4 @@
 - 如果只是 class 顺序、空白、局部样式、部分标签轻微调整，通常还能继续取到数据
 - 如果关键字段整体被替换，例如 `show_x`、`shop_name`、`shop_price`、`data-time`、`showShopinfo(...)` 同时失效，主源解析仍可能失败
 - 主源失败且已配置 `apiKey` 时，插件会自动降级到咸鱼备用源
+- arkmeng 源会先用游客 token 请求 `/api/server-function` 获取本轮商品与截止时间，再读取 `/merchant` 页面的前端图标规则，把缺失的图标补成 `/storage/files/图片/远行商人/<商品名>.png`
