@@ -81,7 +81,7 @@ ${content.join('\n')}
 }
 
 function formatSource(source: SourceName) {
-  if (source === 'onebiji') return 'onebiji 主源'
+  if (source === 'onebiji') return 'onebiji 页面源'
   if (source === 'arkmeng') return '洛克万事屋'
   return '咸鱼备用源'
 }

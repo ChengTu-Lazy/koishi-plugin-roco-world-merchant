@@ -6,12 +6,12 @@ import { Config } from './types'
 export const ConfigSchema: Schema<Config> = Schema.object({
   primarySourceUrl: Schema.string()
     .default(PRIMARY_SOURCE_URL)
-    .description('主数据源页面地址，默认使用 onebiji 的洛克王国世界远行商人页面。'),
+    .description('onebiji 页面源地址；当默认源切到其他数据源后，仍会作为自动回退候补源使用。'),
   preferredSource: Schema.union([
-    Schema.const('onebiji').description('主源 onebiji 优先'),
+    Schema.const('onebiji').description('onebiji 页面源优先'),
     Schema.const('arkmeng').description('洛克万事屋 arkmeng 优先'),
     Schema.const('xianyuw').description('咸鱼源优先'),
-  ]).default('onebiji').description('默认数据源。切换后会优先使用该源；若该源失败，仍会自动尝试其他可用源。'),
+  ]).default('arkmeng').description('默认数据源。默认优先使用 arkmeng；若该源失败，仍会自动尝试其他可用源。'),
   apiKey: Schema.string().default('').description('咸鱼备用数据源的 API key，可留空。'),
   apiBaseUrl: Schema.string()
     .default(BACKUP_SOURCE_URL)

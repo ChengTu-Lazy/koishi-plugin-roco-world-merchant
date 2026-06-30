@@ -140,7 +140,7 @@ export class MerchantStore {
       if (source === 'onebiji') {
         attempts.push({
           source,
-          label: '主数据源 onebiji',
+          label: '数据源 onebiji 页面源',
           fetch: async () => {
             const html = await fetchPrimaryHtml(ctx, config)
             return parsePrimaryHtml(html, config.timezoneOffset)
@@ -190,10 +190,10 @@ export class MerchantStore {
 
   private getPreferredSource(): SourceName {
     const source = this.options.config.preferredSource
-    if (source === 'xianyuw' || source === 'arkmeng') {
+    if (source === 'onebiji' || source === 'xianyuw') {
       return source
     }
-    return 'onebiji'
+    return 'arkmeng'
   }
 
   private async ensureImage(entry: CacheEntry) {

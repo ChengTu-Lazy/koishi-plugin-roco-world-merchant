@@ -1,14 +1,13 @@
 # koishi-plugin-roco-world-merchant
 
 [![npm](https://img.shields.io/npm/v/koishi-plugin-roco-world-merchant?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-roco-world-merchant)
-
 用于获取《洛克王国：世界》远行商人数据的 Koishi 插件。
 
 数据源策略：
 
-- 默认主数据源：`onebiji` 的免 key 页面
-- 新增免 key 数据源：`arkmeng` 洛克万事屋，接口提供截止时间，页面规则补全商品图标
-- 支持通过 `preferredSource` 手动切换默认数据源到 `onebiji`、`arkmeng` 或 `xianyuw`
+- 默认主数据源：`arkmeng` 洛克万事屋免登录接口
+- `onebiji` 免 key 页面作为自动回退候补源
+- 支持通过 `preferredSource` 手动切换默认数据源到 `arkmeng`、`onebiji` 或 `xianyuw`
 - 备用数据源：咸鱼 API
 - 主源请求失败后，会自动切换到其他可用源
 - 只有所有可用数据源都失败时，才会回退到旧缓存
@@ -36,8 +35,8 @@
 
 ## 配置说明
 
-- `primarySourceUrl`: onebiji 主数据源页面地址
-- `preferredSource`: 默认数据源，可选 `onebiji`、`arkmeng` 或 `xianyuw`
+- `primarySourceUrl`: onebiji 页面源地址，作为 arkmeng 失败后的候补页源
+- `preferredSource`: 默认数据源，可选 `onebiji`、`arkmeng` 或 `xianyuw`，默认 `arkmeng`
 - `apiKey`: 咸鱼备用数据源的 key，可留空
 - `apiBaseUrl`: 咸鱼备用数据源接口地址
 - `refreshValue`: 透传到咸鱼备用接口的 `refresh` 参数
@@ -95,8 +94,8 @@
 - `src/index.ts`: Koishi 插件入口、命令注册、定时调度、推送发送
 - `src/schema.ts`: 配置项 Schema
 - `src/services/merchant-store.ts`: 缓存、主备源切换、图片确保逻辑
-- `src/sources/onebiji.ts`: onebiji 主源抓取与解析
-- `src/sources/arkmeng.ts`: 洛克万事屋接口抓取，并按页面图标规则补全商品图标
+- `src/sources/onebiji.ts`: onebiji 页面候补源抓取与解析
+- `src/sources/arkmeng.ts`: 洛克万事屋默认主源抓取，并按页面图标规则补全商品图标
 - `src/sources/xianyuw.ts`: 咸鱼备用源接口封装
 - `src/render/image.ts`: SVG 卡片结构生成
 - `src/render/puppeteer.ts`: 基于 `ctx.puppeteer` 的 PNG 截图渲染
@@ -106,17 +105,23 @@
 
 ## 页面改版兼容性说明
 
-当前主源是免 key 的 HTML 页面，不是稳定 JSON API，所以无法保证页面大改后一定无感继续工作。
+当前默认主源是 `arkmeng` 的免登录接口；它虽然不需要 key，但也不是官方稳定公开 API，所以无法保证站点大改后一定无感继续工作。
 
-为了尽量提高抗改版能力，这个插件现在会按下面顺序解析主源：
+为了尽量提高抗改版能力，这个插件现在会按下面顺序获取数据：
 
-1. 先读页面内联脚本里的 `index`、`hour`、`serverNow` 等状态变量
-2. 再回退到 `.time-list`、`.shop-list` 等 DOM 结构
-3. 商品名、价格、限购、图片、时间标签都提供了多套候选提取规则
+1. 先请求 `arkmeng` 的游客 token，再调用 `/api/server-function` 获取本轮商品与截止时间
+2. 再读取 `/merchant` 页面前端规则，优先校验图标路径规则是否仍存在
+3. 如果 `arkmeng` 失败，会自动回退到 `onebiji` 页面源，最后才尝试已配置 key 的咸鱼源
 
 这意味着：
 
-- 如果只是 class 顺序、空白、局部样式、部分标签轻微调整，通常还能继续取到数据
-- 如果关键字段整体被替换，例如 `show_x`、`shop_name`、`shop_price`、`data-time`、`showShopinfo(...)` 同时失效，主源解析仍可能失败
-- 主源失败且已配置 `apiKey` 时，插件会自动降级到咸鱼备用源
-- arkmeng 源会先用游客 token 请求 `/api/server-function` 获取本轮商品与截止时间，再读取 `/merchant` 页面的前端图标规则，把缺失的图标补成 `/storage/files/图片/远行商人/<商品名>.png`
+- 如果 `arkmeng` 只是页面 chunk 名、静态资源路径或局部脚本有轻微调整，接口数据通常仍有机会继续取到
+- 如果 `/api/web-auth/guest`、`/api/server-function` 或其返回结构整体变化，`arkmeng` 主源会失败并自动切换到后备源
+- 即使 `arkmeng` 页面里的图标规则失效，插件也会先回退到按商品名推导的固定图标路径，而不是立刻整源失败
+- `onebiji` 候补源依旧保留了多套脚本变量和 DOM 解析规则；只有所有可用源都失败时，才会回退到旧缓存
+
+## 鸣谢
+
+感谢 `洛克万事屋` 及其作者对本插件的支持。
+
+经沟通，作者已允许本插件使用其未登录即可请求的相关接口，作为洛克王国世界远行商人数据的可用来源之一。
