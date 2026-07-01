@@ -4,9 +4,13 @@ import { Context, Logger, h } from 'koishi'
 
 import { DEFAULT_WATCH_ITEMS } from './constants'
 import { ConfigSchema } from './schema'
+import { buildHomeQueryMessage } from './render/home'
 import { buildMessage } from './render/message'
+import { HomeStore } from './services/home-store'
 import { MerchantStore } from './services/merchant-store'
+import { isValidHomeUid, normalizeHomeUid } from './sources/home'
 import { CacheEntry, Config as PluginConfig, PushTarget } from './types'
+import { formatError } from './utils/error'
 import { formatDateTime, formatLegacyScheduleKey, formatScheduleKey, getLastScheduleTime, getNextScheduleTime, normalizeScheduleTimes } from './utils/time'
 import { buildWatchNotice, findWatchMatch } from './utils/watch'
 
@@ -20,6 +24,7 @@ export const Config = ConfigSchema
 export async function apply(ctx: Context, config: PluginConfig) {
   const logger = new Logger(name)
   const stateFile = resolve(ctx.baseDir, 'data', 'roco-world-merchant', 'cache.json')
+  const homeStateFile = resolve(ctx.baseDir, 'data', 'roco-world-merchant', 'home-query.json')
   const scheduleTimes = normalizeScheduleTimes(config.scheduleTimes, config.scheduleHours)
   const watchConfig = {
     enabled: config.watch?.enabled ?? true,
@@ -34,8 +39,17 @@ export async function apply(ctx: Context, config: PluginConfig) {
     stateFile,
     scheduleTimes,
   })
+  const homeStore = config.homeQueryEnabled
+    ? new HomeStore({
+      ctx,
+      logger,
+      config,
+      stateFile: homeStateFile,
+    })
+    : null
 
   await store.init()
+  await homeStore?.init()
 
   let cancelNextPush: (() => void) | null = null
 
@@ -134,6 +148,39 @@ export async function apply(ctx: Context, config: PluginConfig) {
       : '已强制刷新远行商人数据。'
 
     return `${prefix}\n${message}`
+  }
+
+  async function handleHomeQuery(session: any, rawUid?: string) {
+    if (!homeStore) {
+      return '家园查询功能未开启，请先在插件配置中启用 homeQueryEnabled。'
+    }
+
+    const rememberKey = getHomeRememberKey(session)
+    const inputUid = normalizeHomeUid(rawUid)
+    const uid = inputUid || homeStore.getRememberedUid(rememberKey)
+
+    if (!uid) {
+      return '请在命令后输入 UID，例如：查家园 100001。成功查询后，下次可以直接发送：查家园'
+    }
+
+    if (!isValidHomeUid(uid)) {
+      return 'UID 必须为 6-12 位纯数字。'
+    }
+
+    try {
+      const result = await homeStore.query(uid)
+      await homeStore.rememberUid(rememberKey, uid)
+      return buildHomeQueryMessage(result, config.timezoneOffset)
+    } catch (error) {
+      return `家园查询失败：${formatError(error)}`
+    }
+  }
+
+  function getHomeRememberKey(session: any) {
+    const platform = session?.platform || 'unknown'
+    if (session?.userId) return `${platform}:user:${session.userId}`
+    if (session?.channelId) return `${platform}:channel:${session.channelId}`
+    return `${platform}:global`
   }
 
   async function sendTargetMessage(target: PushTarget, message: string, shouldMentionAll: boolean) {
@@ -268,5 +315,16 @@ export async function apply(ctx: Context, config: PluginConfig) {
 
   if (refreshCommandAliases.length) {
     refreshCommand.alias(...refreshCommandAliases)
+  }
+
+  if (config.homeQueryEnabled) {
+    const homeCommandName = config.homeCommandName?.trim() || '查家园'
+    const homeCommand = ctx.command(`${homeCommandName} [uid:string]`, '查询洛克王国世界家园信息')
+      .action(async ({ session }, uid) => handleHomeQuery(session, uid))
+
+    const homeAliases = (config.homeCommandAliases || []).filter(Boolean)
+    if (homeAliases.length) {
+      homeCommand.alias(...homeAliases)
+    }
   }
 }

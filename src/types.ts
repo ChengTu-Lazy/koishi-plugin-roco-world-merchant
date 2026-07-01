@@ -29,6 +29,10 @@ export interface Config {
   outputMode: OutputMode
   commandName: string
   commandAliases: string[]
+  homeQueryEnabled: boolean
+  homeCommandName: string
+  homeCommandAliases: string[]
+  homeQueryCacheMinutes: number
   timezoneOffset: number
   scheduleTimes?: string[]
   scheduleHours?: number[]
@@ -106,4 +110,54 @@ export interface PrimarySlot {
   end: string
   label: string
   active: boolean
+}
+
+export interface HomeOverview {
+  homeName?: string
+  homeLevel?: number
+  comfortLevel?: number
+  experience?: number
+}
+
+export interface HomePet {
+  name?: string
+  petCfgId?: number
+  level?: number
+  gender?: number
+  mutationType?: number
+  hasEgg?: boolean
+  status?: number
+}
+
+export interface HomePlot {
+  plotId?: number
+  seedId?: number
+  state?: number
+  ripTime?: number
+  harvestNum?: number
+  canStealCount?: number
+  stealCount?: number
+}
+
+export interface HomeLand {
+  plots?: HomePlot[]
+}
+
+export interface HomeInfo {
+  overview?: HomeOverview
+  pets?: HomePet[]
+  lands?: HomeLand[]
+  plantCount?: number
+  plantUnlocked?: boolean
+}
+
+export interface HomeQueryData {
+  uid: string
+  fetchedAt: number
+  home: HomeInfo
+}
+
+export interface HomeQueryResult extends HomeQueryData {
+  origin: 'cache' | 'live' | 'stale'
+  warning?: string
 }

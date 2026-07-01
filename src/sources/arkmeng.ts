@@ -5,7 +5,7 @@ import { Config, MerchantData, MerchantItem } from '../types'
 import { normalizeTimestampMs, parseInteger, parseLimit, parsePrice } from '../utils/parse'
 import { formatCountdown, formatDateOnly, shiftToTimezone } from '../utils/time'
 
-const ARKMENG_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0 Safari/537.36'
+export const ARKMENG_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0 Safari/537.36'
 
 type IconResolver = (name: string, explicitUrl?: unknown) => string
 
@@ -32,34 +32,44 @@ export async function fetchArkmengMerchantData(ctx: Context, config: Config) {
 }
 
 export async function fetchArkmengMerchantResult(ctx: Context, config: Config) {
-  const token = await fetchArkmengGuestToken(ctx, config)
+  return await callArkmengServerFunction(ctx, config, 'merchant', {}, '/merchant')
+}
+
+export async function callArkmengServerFunction(
+  ctx: Context,
+  config: Config,
+  name: string,
+  data: Record<string, unknown> = {},
+  refererPath = '/',
+) {
+  const token = await fetchArkmengGuestToken(ctx, config, refererPath)
   const response = await ctx.http.post(arkmengUrl('/api/server-function'), {
-    name: 'merchant',
-    data: {},
+    name,
+    data,
   }, {
     timeout: config.requestTimeout,
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       Origin: ARKMENG_BASE_URL,
-      Referer: arkmengUrl('/merchant'),
+      Referer: arkmengUrl(refererPath),
       'User-Agent': ARKMENG_USER_AGENT,
     },
   }) as ArkmengFunctionResponse
 
   if (!response || !('result' in response)) {
-    throw new Error(`arkmeng server-function 返回异常：${response?.message || response?.error || 'missing result'}`)
+    throw new Error(`arkmeng server-function ${name} 返回异常：${response?.message || response?.error || 'missing result'}`)
   }
 
   return response.result
 }
 
-export async function fetchArkmengGuestToken(ctx: Context, config: Config) {
+export async function fetchArkmengGuestToken(ctx: Context, config: Config, refererPath = '/merchant') {
   const response = await ctx.http.post(arkmengUrl('/api/web-auth/guest'), undefined, {
     timeout: config.requestTimeout,
     headers: {
       Origin: ARKMENG_BASE_URL,
-      Referer: arkmengUrl('/merchant'),
+      Referer: arkmengUrl(refererPath),
       'User-Agent': ARKMENG_USER_AGENT,
     },
   }) as ArkmengGuestResponse
@@ -80,6 +90,11 @@ export function normalizeArkmengMerchantResult(
   const root = asRecord(result)
   const data = asRecord(root.data)
   const container = Object.keys(data).length ? data : root
+  const sourceStatus = readStringValue(root._source) || readStringValue(container._source)
+  if (sourceStatus === 'pending') {
+    throw new Error('洛克万事屋远行商人数据暂未获取到，当前处于 pending 状态')
+  }
+
   const activities = asArray(container.merchantActivities)
   const activity = asRecord(activities[0])
   const rawItems = resolveRawItems(container, activity, activities)
@@ -92,7 +107,8 @@ export function normalizeArkmengMerchantResult(
     .slice(0, 6)
 
   if (!items.length) {
-    throw new Error('arkmeng 接口未返回远行商人商品数据')
+    const message = readStringValue(container.message) || readStringValue(root.message)
+    throw new Error(message || '洛克万事屋接口未返回远行商人商品数据')
   }
 
   const startTimes = items
@@ -208,6 +224,7 @@ function normalizeArkmengItem(
 function resolveRawItems(container: Record<string, unknown>, activity: Record<string, unknown>, activities: unknown[]) {
   const activityItems = asArray(activity.get_props)
   if (activityItems.length) return activityItems
+  if (Array.isArray(activity.get_props)) return []
 
   const items = asArray(container.items)
   if (items.length) return items

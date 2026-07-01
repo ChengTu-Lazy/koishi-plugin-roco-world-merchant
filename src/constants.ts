@@ -1,5 +1,5 @@
 export const DEFAULT_SCHEDULE_HOURS = [8, 12, 16, 20]
-export const DEFAULT_SCHEDULE_TIMES = ['08:00', '12:00', '16:00', '20:00']
+export const DEFAULT_SCHEDULE_TIMES = ['08:05', '12:05', '16:05', '20:05']
 export const DEFAULT_WATCH_ITEMS = [
   '国王球',
   '棱镜球',

@@ -27,6 +27,17 @@ export const ConfigSchema: Schema<Config> = Schema.object({
     .default(['远行商人', '商人'])
     .role('table')
     .description('命令别名列表。'),
+  homeQueryEnabled: Schema.boolean()
+    .default(false)
+    .description('是否启用家园查询功能。默认关闭；开启后才会注册查家园命令并请求洛克万事屋家园接口。'),
+  homeCommandName: Schema.string().default('查家园').description('家园查询命令名。'),
+  homeCommandAliases: Schema.array(Schema.string())
+    .default(['家园查询'])
+    .role('table')
+    .description('家园查询命令别名列表。'),
+  homeQueryCacheMinutes: Schema.number()
+    .default(5)
+    .description('家园查询结果的短缓存分钟数；用于减少重复请求洛克万事屋接口。'),
   timezoneOffset: Schema.number().default(8).description('定时推送使用的时区偏移，默认东八区。'),
   scheduleTimes: Schema.array(Schema.string())
     .default(DEFAULT_SCHEDULE_TIMES)
