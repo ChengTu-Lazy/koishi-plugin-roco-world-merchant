@@ -39,6 +39,26 @@ export async function renderPngWithPuppeteer(ctx: Context, image: SvgImage) {
       if ('fonts' in document) {
         await document.fonts.ready
       }
+
+      const imageHrefs = Array.from(document.querySelectorAll('svg image'))
+        .map((element) => element.getAttribute('href') || element.getAttribute('xlink:href') || '')
+        .filter(Boolean)
+
+      await Promise.all(imageHrefs.map(src => new Promise<void>((resolve) => {
+        const img = new Image()
+        const timer = window.setTimeout(resolve, 5000)
+        img.onload = () => {
+          window.clearTimeout(timer)
+          resolve()
+        }
+        img.onerror = () => {
+          window.clearTimeout(timer)
+          resolve()
+        }
+        img.src = src
+      })))
+
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
     })
 
     const handle = await page.$('svg')

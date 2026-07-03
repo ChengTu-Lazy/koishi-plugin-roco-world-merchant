@@ -1,5 +1,7 @@
 export type OutputMode = 'text' | 'image' | 'both'
-export type SourceName = 'onebiji' | 'arkmeng' | 'xianyuw'
+export type SourceName = 'onebiji' | 'arkmeng' | 'magicbook' | 'xianyuw'
+export type HomeSourceName = 'arkmeng' | 'magicbook'
+export type AnnouncementPushMode = 'activities' | 'announcement' | 'both'
 
 export interface ScheduleTime {
   hour: number
@@ -20,16 +22,32 @@ export interface WatchConfig {
   mentionAllOnMatch: boolean
 }
 
+export interface AnnouncementPushConfig {
+  enabled: boolean
+  time: string
+  mode: AnnouncementPushMode
+  onlyNotifyOnChange: boolean
+}
+
+export interface HomeCheckConfig {
+  enabled: boolean
+  mentionUser: boolean
+  maxBindingsPerTarget: number
+}
+
 export interface Config {
   primarySourceUrl: string
   preferredSource: SourceName
   apiKey: string
   apiBaseUrl: string
+  rocomApiKey: string
+  rocomApiBaseUrl: string
   refreshValue: string
   outputMode: OutputMode
   commandName: string
   commandAliases: string[]
   homeQueryEnabled: boolean
+  homePreferredSource: HomeSourceName
   homeCommandName: string
   homeCommandAliases: string[]
   homeQueryCacheMinutes: number
@@ -41,12 +59,16 @@ export interface Config {
   pushOnStartupIfMissed: boolean
   startupCatchupWindowMinutes: number
   watch: WatchConfig
+  announcementPush: AnnouncementPushConfig
+  homeCheck: HomeCheckConfig
 }
 
 export interface MerchantRound {
   current?: number
   total?: number
   status?: string
+  start_time?: number
+  end_time?: number
   label?: string
   countdown?: string
 }
@@ -81,6 +103,7 @@ export interface MerchantApiResponse {
 }
 
 export interface CacheEntry {
+  dataVersion?: string
   slotKey: string
   expiresAt: number
   fetchedAt: number
@@ -122,9 +145,15 @@ export interface HomeOverview {
 export interface HomePet {
   name?: string
   petCfgId?: number
+  iconUrl?: string
   level?: number
   gender?: number
+  energy?: number
+  feedRound?: number
   mutationType?: number
+  mutationName?: string
+  inspirationReadyAt?: number
+  inspirationDuration?: number
   hasEgg?: boolean
   status?: number
 }
@@ -132,8 +161,11 @@ export interface HomePet {
 export interface HomePlot {
   plotId?: number
   seedId?: number
+  seedName?: string
+  iconUrl?: string
   state?: number
   ripTime?: number
+  growDuration?: number
   harvestNum?: number
   canStealCount?: number
   stealCount?: number
@@ -160,4 +192,32 @@ export interface HomeQueryData {
 export interface HomeQueryResult extends HomeQueryData {
   origin: 'cache' | 'live' | 'stale'
   warning?: string
+}
+
+export interface HomeBinding {
+  key: string
+  uid: string
+  platform: string
+  channelId: string
+  guildId?: string
+  userId: string
+  username?: string
+  updatedAt: number
+}
+
+export interface AnnouncementItem {
+  type: '公告' | '活动'
+  id?: string
+  title: string
+  summary?: string
+  time?: number
+  url?: string
+  status?: string
+}
+
+export interface AnnouncementData {
+  fetchedAt: number
+  mode: AnnouncementPushMode
+  items: AnnouncementItem[]
+  warnings?: string[]
 }

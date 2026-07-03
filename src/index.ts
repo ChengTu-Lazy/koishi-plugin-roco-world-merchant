@@ -4,14 +4,21 @@ import { Context, Logger, h } from 'koishi'
 
 import { DEFAULT_WATCH_ITEMS } from './constants'
 import { ConfigSchema } from './schema'
+import { buildAnnouncementMessage } from './render/announcement'
+import { buildHomeAlertMessage, HomeAlertEntry } from './render/home-alert'
+import { renderHomeSvgImage } from './render/home-image'
 import { buildHomeQueryMessage } from './render/home'
 import { buildMessage } from './render/message'
+import { renderPngWithPuppeteer } from './render/puppeteer'
+import { AnnouncementStore, createAnnouncementSignature } from './services/announcement-store'
+import { AssetCache } from './services/asset-cache'
 import { HomeStore } from './services/home-store'
 import { MerchantStore } from './services/merchant-store'
 import { isValidHomeUid, normalizeHomeUid } from './sources/home'
-import { CacheEntry, Config as PluginConfig, PushTarget } from './types'
+import { CacheEntry, Config as PluginConfig, HomeBinding, HomeQueryResult, PushTarget } from './types'
 import { formatError } from './utils/error'
-import { formatDateTime, formatLegacyScheduleKey, formatScheduleKey, getLastScheduleTime, getNextScheduleTime, normalizeScheduleTimes } from './utils/time'
+import { summarizeHomeAlert } from './utils/home'
+import { formatDateTime, formatLegacyScheduleKey, formatScheduleKey, getLastScheduleTime, getNextScheduleTime, normalizeScheduleTimes, parseHourMinute } from './utils/time'
 import { buildWatchNotice, findWatchMatch } from './utils/watch'
 
 export const name = 'roco-world-merchant'
@@ -25,11 +32,23 @@ export async function apply(ctx: Context, config: PluginConfig) {
   const logger = new Logger(name)
   const stateFile = resolve(ctx.baseDir, 'data', 'roco-world-merchant', 'cache.json')
   const homeStateFile = resolve(ctx.baseDir, 'data', 'roco-world-merchant', 'home-query.json')
+  const announcementStateFile = resolve(ctx.baseDir, 'data', 'roco-world-merchant', 'announcement.json')
+  const assetCacheDir = resolve(ctx.baseDir, 'data', 'roco-world-merchant', 'assets')
   const scheduleTimes = normalizeScheduleTimes(config.scheduleTimes, config.scheduleHours)
   const watchConfig = {
     enabled: config.watch?.enabled ?? true,
     items: config.watch?.items?.length ? config.watch.items : DEFAULT_WATCH_ITEMS,
     mentionAllOnMatch: config.watch?.mentionAllOnMatch ?? true,
+  }
+  const homeCheckConfig = {
+    enabled: config.homeCheck?.enabled ?? true,
+    mentionUser: config.homeCheck?.mentionUser ?? true,
+    maxBindingsPerTarget: Math.max(1, config.homeCheck?.maxBindingsPerTarget ?? 20),
+  }
+  const announcementConfig = {
+    enabled: config.announcementPush?.enabled ?? false,
+    time: config.announcementPush?.time || '10:00',
+    onlyNotifyOnChange: config.announcementPush?.onlyNotifyOnChange ?? false,
   }
   const needImageByDefault = config.outputMode !== 'text'
   const store = new MerchantStore({
@@ -47,11 +66,27 @@ export async function apply(ctx: Context, config: PluginConfig) {
       stateFile: homeStateFile,
     })
     : null
+  const announcementStore = announcementConfig.enabled
+    ? new AnnouncementStore({
+      ctx,
+      logger,
+      config,
+      stateFile: announcementStateFile,
+    })
+    : null
+  const assetCache = new AssetCache({
+    ctx,
+    logger,
+    config,
+    cacheDir: assetCacheDir,
+  })
 
   await store.init()
   await homeStore?.init()
+  await announcementStore?.init()
 
   let cancelNextPush: (() => void) | null = null
+  let cancelNextAnnouncementPush: (() => void) | null = null
 
   function isScheduleAlreadyPushed(scheduleTime: Date) {
     const currentKey = formatScheduleKey(scheduleTime, config.timezoneOffset)
@@ -157,10 +192,11 @@ export async function apply(ctx: Context, config: PluginConfig) {
 
     const rememberKey = getHomeRememberKey(session)
     const inputUid = normalizeHomeUid(rawUid)
-    const uid = inputUid || homeStore.getRememberedUid(rememberKey)
+    const boundUid = homeStore.getBoundUid(session)
+    const uid = inputUid || boundUid || homeStore.getRememberedUid(rememberKey)
 
     if (!uid) {
-      return '请在命令后输入 UID，例如：查家园 100001。成功查询后，下次可以直接发送：查家园'
+      return '请在命令后输入 UID，例如：查家园 100001。也可以先发送：绑定家园 100001，之后直接发送：查家园'
     }
 
     if (!isValidHomeUid(uid)) {
@@ -170,10 +206,80 @@ export async function apply(ctx: Context, config: PluginConfig) {
     try {
       const result = await homeStore.query(uid)
       await homeStore.rememberUid(rememberKey, uid)
-      return buildHomeQueryMessage(result, config.timezoneOffset)
+      return await buildHomeQueryOutput(result)
     } catch (error) {
       return `家园查询失败：${formatError(error)}`
     }
+  }
+
+  async function buildHomeQueryOutput(result: HomeQueryResult) {
+    const text = buildHomeQueryMessage(result, config.timezoneOffset)
+    if (config.outputMode === 'text') {
+      return text
+    }
+
+    try {
+      const image = renderHomeSvgImage(result, config.timezoneOffset)
+      image.svg = await assetCache.inlineSvgImages(image.svg)
+      const buffer = await renderPngWithPuppeteer(ctx, image)
+      const imageTag = h.image(buffer, 'image/png').toString()
+      if (config.outputMode === 'image') {
+        return imageTag
+      }
+      return `${text}\n${imageTag}`
+    } catch (error) {
+      logger.warn(`家园查询图片生成失败，已回退文字消息：${formatError(error)}`)
+      return text
+    }
+  }
+
+  async function handleHomeBind(session: any, rawUid?: string) {
+    if (!homeStore) {
+      return '家园查询功能未开启，请先在插件配置中启用 homeQueryEnabled。'
+    }
+
+    const uid = normalizeHomeUid(rawUid)
+    if (!uid) {
+      return '请在命令后输入要绑定的 UID，例如：绑定家园 100001'
+    }
+
+    if (!isValidHomeUid(uid)) {
+      return 'UID 必须为 6-12 位纯数字。'
+    }
+
+    try {
+      const binding = await homeStore.bindSession(session, uid)
+      await homeStore.rememberUid(getHomeRememberKey(session), uid)
+      return `已绑定家园 UID：${binding.uid}。之后可直接发送“查家园”，远行商人推送节点也会检查是否有蛋未取或菜未收。`
+    } catch (error) {
+      return `家园绑定失败：${formatError(error)}`
+    }
+  }
+
+  async function handleHomeUnbind(session: any) {
+    if (!homeStore) {
+      return '家园查询功能未开启，请先在插件配置中启用 homeQueryEnabled。'
+    }
+
+    const binding = await homeStore.unbindSession(session)
+    if (!binding) {
+      return '当前群/用户还没有绑定家园 UID。'
+    }
+
+    return `已解绑家园 UID：${binding.uid}。`
+  }
+
+  function handleHomeBindingInfo(session: any) {
+    if (!homeStore) {
+      return '家园查询功能未开启，请先在插件配置中启用 homeQueryEnabled。'
+    }
+
+    const binding = homeStore.getBinding(session)
+    if (!binding) {
+      return '当前群/用户还没有绑定家园 UID。可以发送：绑定家园 100001'
+    }
+
+    return `当前绑定家园 UID：${binding.uid}。可发送“查家园”直接查询，或发送“解绑家园”取消绑定。`
   }
 
   function getHomeRememberKey(session: any) {
@@ -197,6 +303,105 @@ export async function apply(ctx: Context, config: PluginConfig) {
       logger.warn(`关注物品命中但 @全体 发送失败，已回退普通消息：${target.platform}:${target.channelId} -> ${error instanceof Error ? error.message : String(error)}`)
       await bot.sendMessage(target.channelId, message, target.guildId || undefined)
     }
+  }
+
+  async function doHomeCheck(scheduleTime: Date, reason: 'schedule' | 'startup') {
+    if (!homeStore || !homeCheckConfig.enabled || !config.pushTargets.length) {
+      return
+    }
+
+    const scheduleKey = formatScheduleKey(scheduleTime, config.timezoneOffset)
+    if (homeStore.lastCheckedScheduleKey === scheduleKey) {
+      logger.info(`跳过重复家园检查：${scheduleKey}`)
+      return
+    }
+
+    const allBindings = homeStore.listBindings()
+    if (!allBindings.length) {
+      return
+    }
+
+    const queryCache = new Map<string, Promise<HomeQueryResult>>()
+    let checkedCount = 0
+    let notifiedCount = 0
+
+    for (const target of config.pushTargets) {
+      const targetBindings = allBindings
+        .filter(binding => isBindingForTarget(binding, target))
+        .slice(0, homeCheckConfig.maxBindingsPerTarget)
+      if (!targetBindings.length) {
+        continue
+      }
+
+      checkedCount += targetBindings.length
+      const entries = (await Promise.all(targetBindings.map(async (binding) => {
+        try {
+          const result = await queryBoundHome(binding, queryCache)
+          const alert = summarizeHomeAlert(result.home)
+          if (!alert.hasAlert) {
+            return null
+          }
+
+          return {
+            binding,
+            result,
+            eggs: alert.eggs,
+            ripePlots: alert.ripePlots,
+          } satisfies HomeAlertEntry
+        } catch (error) {
+          logger.warn(`家园定时检查失败：${binding.platform}:${binding.channelId}:${binding.userId} UID ${binding.uid} -> ${formatError(error)}`)
+          return null
+        }
+      }))).filter((entry): entry is HomeAlertEntry => Boolean(entry))
+
+      if (!entries.length) {
+        continue
+      }
+
+      const message = buildHomeAlertMessage(entries, config.timezoneOffset, homeCheckConfig.mentionUser)
+      try {
+        await sendTargetMessage(target, message, false)
+        notifiedCount += entries.length
+      } catch (error) {
+        const label = target.name || `${target.platform}:${target.selfId}:${target.channelId}`
+        logger.warn(`家园提醒推送失败：${label} -> ${formatError(error)}`)
+      }
+    }
+
+    if (checkedCount > 0) {
+      await homeStore.rememberHomeCheck(scheduleKey)
+      logger.info(`家园检查完成：${scheduleKey} (${reason})，检查 ${checkedCount} 个绑定，提醒 ${notifiedCount} 个绑定`)
+    }
+  }
+
+  function queryBoundHome(binding: HomeBinding, queryCache: Map<string, Promise<HomeQueryResult>>) {
+    if (!homeStore) {
+      throw new Error('家园查询功能未开启')
+    }
+
+    const cached = queryCache.get(binding.uid)
+    if (cached) {
+      return cached
+    }
+
+    const promise = homeStore.query(binding.uid, { forceRefresh: true })
+    queryCache.set(binding.uid, promise)
+    return promise
+  }
+
+  function isBindingForTarget(binding: HomeBinding, target: PushTarget) {
+    const targetAliases = getPlatformAliases(target.platform)
+    const bindingPlatform = binding.platform.trim().toLowerCase()
+    if (!targetAliases.has(bindingPlatform)) {
+      return false
+    }
+    if (binding.channelId !== target.channelId) {
+      return false
+    }
+    if (target.guildId && binding.guildId && target.guildId !== binding.guildId) {
+      return false
+    }
+    return true
   }
 
   async function doPush(scheduleTime: Date, reason: 'schedule' | 'startup') {
@@ -247,6 +452,86 @@ export async function apply(ctx: Context, config: PluginConfig) {
     }
   }
 
+  async function runScheduleNode(scheduleTime: Date, reason: 'schedule' | 'startup') {
+    try {
+      await doPush(scheduleTime, reason)
+    } catch (error) {
+      logger.warn(`远行商人推送节点异常：${formatError(error)}`)
+    }
+
+    try {
+      await doHomeCheck(scheduleTime, reason)
+    } catch (error) {
+      logger.warn(`家园检查节点异常：${formatError(error)}`)
+    }
+  }
+
+  async function doAnnouncementPush(scheduleTime: Date) {
+    if (!announcementStore || !announcementConfig.enabled || !config.pushTargets.length) {
+      return
+    }
+
+    const scheduleKey = formatScheduleKey(scheduleTime, config.timezoneOffset)
+    if (announcementStore.lastPushedKey === scheduleKey) {
+      logger.info(`跳过重复公告/活动推送：${scheduleKey}`)
+      return
+    }
+
+    if (!config.rocomApiKey?.trim()) {
+      logger.warn('公告/活动推送已开启，但未配置 rocomApiKey，已跳过本次请求。')
+      return
+    }
+
+    let data
+    try {
+      data = await announcementStore.fetchLatest()
+    } catch (error) {
+      logger.warn(`公告/活动获取失败：${formatError(error)}`)
+      return
+    }
+
+    const signature = createAnnouncementSignature(data)
+    if (announcementConfig.onlyNotifyOnChange && signature && signature === announcementStore.lastSignature) {
+      await announcementStore.rememberPush(scheduleKey, signature)
+      logger.info(`公告/活动内容无变化，跳过推送：${scheduleKey}`)
+      return
+    }
+
+    if (!data.items.length) {
+      await announcementStore.rememberPush(scheduleKey, signature)
+      logger.info(`公告/活动本次无可推送内容：${scheduleKey}`)
+      return
+    }
+
+    const message = buildAnnouncementMessage(data, config.timezoneOffset)
+    const errors: string[] = []
+    let successCount = 0
+
+    for (const target of config.pushTargets) {
+      try {
+        await sendTargetMessage(target, message, false)
+        successCount += 1
+      } catch (error) {
+        const label = target.name || `${target.platform}:${target.selfId}:${target.channelId}`
+        const detail = `${label} -> ${formatError(error)}`
+        errors.push(detail)
+        logger.warn(`公告/活动推送失败：${detail}`)
+      }
+    }
+
+    if (successCount > 0) {
+      await announcementStore.rememberPush(scheduleKey, signature)
+    }
+
+    if (!successCount && errors.length) {
+      logger.warn('本次公告/活动推送全部失败，未记录已推送状态。')
+    } else if (errors.length) {
+      logger.warn(`本次公告/活动推送完成，但有 ${errors.length} 个目标失败。`)
+    } else {
+      logger.info(`公告/活动推送完成：${scheduleKey}`)
+    }
+  }
+
   function scheduleNext() {
     cancelNextPush?.()
 
@@ -254,13 +539,35 @@ export async function apply(ctx: Context, config: PluginConfig) {
     const delay = Math.max(1000, nextTime.getTime() - Date.now())
     const scheduleKey = formatScheduleKey(nextTime, config.timezoneOffset)
 
-    logger.info(`下一次远行商人推送时间：${formatDateTime(nextTime, config.timezoneOffset)} (${scheduleKey})`)
+    logger.info(`下一次远行商人/家园检查节点时间：${formatDateTime(nextTime, config.timezoneOffset)} (${scheduleKey})`)
 
     cancelNextPush = ctx.setTimeout(async () => {
       try {
-        await doPush(nextTime, 'schedule')
+        await runScheduleNode(nextTime, 'schedule')
       } finally {
         scheduleNext()
+      }
+    }, delay)
+  }
+
+  function scheduleNextAnnouncementPush() {
+    cancelNextAnnouncementPush?.()
+    if (!announcementStore || !announcementConfig.enabled) {
+      return
+    }
+
+    const announcementTime = parseHourMinute(announcementConfig.time) || { hour: 10, minute: 0 }
+    const nextTime = getNextScheduleTime(new Date(), [announcementTime], config.timezoneOffset)
+    const delay = Math.max(1000, nextTime.getTime() - Date.now())
+    const scheduleKey = formatScheduleKey(nextTime, config.timezoneOffset)
+
+    logger.info(`下一次公告/活动推送时间：${formatDateTime(nextTime, config.timezoneOffset)} (${scheduleKey})`)
+
+    cancelNextAnnouncementPush = ctx.setTimeout(async () => {
+      try {
+        await doAnnouncementPush(nextTime)
+      } finally {
+        scheduleNextAnnouncementPush()
       }
     }, delay)
   }
@@ -277,22 +584,21 @@ export async function apply(ctx: Context, config: PluginConfig) {
       return
     }
 
-    if (isScheduleAlreadyPushed(lastSchedule)) {
-      return
-    }
-
     logger.info(`检测到启动补推窗口，准备补推：${scheduleKey}`)
-    await doPush(lastSchedule, 'startup')
+    await runScheduleNode(lastSchedule, 'startup')
   }
 
   ctx.on('ready', async () => {
     await maybeCatchUpPush()
     scheduleNext()
+    scheduleNextAnnouncementPush()
   })
 
   ctx.on('dispose', () => {
     cancelNextPush?.()
     cancelNextPush = null
+    cancelNextAnnouncementPush?.()
+    cancelNextAnnouncementPush = null
   })
 
   const command = ctx.command(config.commandName, '获取洛克王国世界远行商人数据')
@@ -326,5 +632,14 @@ export async function apply(ctx: Context, config: PluginConfig) {
     if (homeAliases.length) {
       homeCommand.alias(...homeAliases)
     }
+
+    ctx.command('绑定家园 <uid:string>', '绑定当前群/用户的洛克王国世界家园 UID')
+      .action(async ({ session }, uid) => handleHomeBind(session, uid))
+
+    ctx.command('解绑家园', '解绑当前群/用户的家园 UID')
+      .action(async ({ session }) => handleHomeUnbind(session))
+
+    ctx.command('我的家园', '查看当前群/用户绑定的家园 UID')
+      .action(async ({ session }) => handleHomeBindingInfo(session))
   }
 }

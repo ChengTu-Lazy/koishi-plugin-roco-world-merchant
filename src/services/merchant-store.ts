@@ -1,10 +1,11 @@
 import { Context, Logger } from 'koishi'
 
-import { createCacheEntry, getUsableCache, loadState, persistState } from '../cache'
+import { createCacheEntry, getUsableCache, isCompatibleCache, loadState, persistState } from '../cache'
 import { IMAGE_RENDER_VERSION } from '../constants'
 import { ItemIconMap, renderSvgImage } from '../render/image'
 import { renderPngWithPuppeteer } from '../render/puppeteer'
 import { fetchArkmengMerchantData } from '../sources/arkmeng'
+import { fetchMagicBookMerchantData, hasMagicBookSource } from '../sources/magicbook'
 import { fetchPrimaryHtml, parsePrimaryHtml } from '../sources/onebiji'
 import { fetchBackupImageData, fetchBackupJsonData, hasBackupSource } from '../sources/xianyuw'
 import { CacheEntry, CacheResult, Config, MerchantData, PersistedState, ScheduleTime, SourceName } from '../types'
@@ -67,7 +68,7 @@ export class MerchantStore {
       const message = formatError(error)
       this.options.logger.warn(`获取远行商人数据失败：${message}`)
 
-      if (this.state.cache) {
+      if (isCompatibleCache(this.state.cache)) {
         if (requireImage) {
           await this.ensureImage(this.state.cache)
         }
@@ -158,6 +159,15 @@ export class MerchantStore {
         continue
       }
 
+      if (source === 'magicbook' && hasMagicBookSource(config)) {
+        attempts.push({
+          source,
+          label: '数据源 洛克魔法书开放 API',
+          fetch: async () => fetchMagicBookMerchantData(ctx, config),
+        })
+        continue
+      }
+
       if (source === 'xianyuw' && hasBackupSource(config)) {
         attempts.push({
           source,
@@ -169,6 +179,9 @@ export class MerchantStore {
 
     if (preferredSource === 'xianyuw' && !hasBackupSource(config)) {
       logger.warn('当前默认数据源为咸鱼源，但未配置 apiKey，已自动跳过咸鱼源。')
+    }
+    if (preferredSource === 'magicbook' && !hasMagicBookSource(config)) {
+      logger.warn('当前默认数据源为洛克魔法书，但未配置 rocomApiKey，已自动跳过魔法书源。')
     }
 
     return attempts
@@ -190,7 +203,7 @@ export class MerchantStore {
 
   private getPreferredSource(): SourceName {
     const source = this.options.config.preferredSource
-    if (source === 'onebiji' || source === 'xianyuw') {
+    if (source === 'onebiji' || source === 'magicbook' || source === 'xianyuw') {
       return source
     }
     return 'arkmeng'
@@ -282,12 +295,15 @@ export class MerchantStore {
 
 function getSourceOrder(source: SourceName): SourceName[] {
   if (source === 'arkmeng') {
-    return ['arkmeng', 'onebiji', 'xianyuw']
+    return ['arkmeng', 'onebiji', 'magicbook', 'xianyuw']
+  }
+  if (source === 'magicbook') {
+    return ['magicbook', 'arkmeng', 'onebiji', 'xianyuw']
   }
   if (source === 'xianyuw') {
-    return ['xianyuw', 'arkmeng', 'onebiji']
+    return ['xianyuw', 'arkmeng', 'onebiji', 'magicbook']
   }
-  return ['onebiji', 'arkmeng', 'xianyuw']
+  return ['onebiji', 'arkmeng', 'magicbook', 'xianyuw']
 }
 
 function guessImageMimeType(url: string) {

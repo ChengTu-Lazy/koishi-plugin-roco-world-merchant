@@ -1,49 +1,29 @@
 import { HomeInfo, HomePet, HomePlot, HomeQueryResult } from '../types'
+import {
+  flattenHomePlots,
+  getGuardHomePets,
+  getHomeEggPets,
+  getHomePlotName,
+  getHomeStealLeft,
+  getLivingHomePets,
+  getPlantedHomePlots,
+  getRipeHomePlots,
+} from '../utils/home'
 import { formatDateTime } from '../utils/time'
 
-const GUARD_STATUS = 1704
 const MAX_PET_LINES = 10
-const MAX_PLOT_LINES = 12
-
-const SEED_NAMES: Record<number, string> = {
-  330001: '向阳花',
-  330002: '伞伞菌',
-  330003: '蓝掌',
-  330004: '睡铃',
-  330005: '天使草',
-  330006: '喵喵草',
-  330007: '蜜黄菌',
-  330008: '喷气菇',
-  330009: '幽幽草',
-  330010: '星霜花',
-  330011: '雪菇',
-  330012: '花星角',
-  330013: '荧光兰',
-  330014: '大嘴花',
-  330015: '流星兰',
-  330016: '紫晶菇',
-  330017: '海桑花',
-  330018: '恶魔雪茄',
-  330019: '火焰花',
-  330020: '彩玉花',
-  330021: '象牙花',
-  330022: '海神花',
-  330023: '紫雀花',
-  330024: '短木莲',
-}
 
 export function buildHomeQueryMessage(result: HomeQueryResult, timezoneOffset: number) {
   const home = result.home
   const overview = home.overview || {}
   const homeName = overview.homeName || '未命名家园'
-  const pets = Array.isArray(home.pets) ? home.pets : []
-  const livingPets = pets.filter(pet => pet.status !== GUARD_STATUS)
-  const guardPets = pets.filter(pet => pet.status === GUARD_STATUS)
-  const eggs = livingPets.filter(pet => pet.hasEgg)
-  const plots = flattenPlots(home)
-  const plantedPlots = plots.filter(plot => !isEmptyPlot(plot))
-  const ripePlots = plantedPlots.filter(isRipePlot)
-  const stealLeft = plantedPlots.reduce((total, plot) => total + getStealLeft(plot), 0)
+  const livingPets = getLivingHomePets(home)
+  const guardPets = getGuardHomePets(home)
+  const eggs = getHomeEggPets(home)
+  const plots = flattenHomePlots(home)
+  const plantedPlots = getPlantedHomePlots(home)
+  const ripePlots = getRipeHomePlots(home)
+  const stealLeft = plantedPlots.reduce((total, plot) => total + getHomeStealLeft(plot), 0)
 
   const lines = [
     `【家园查询】${homeName}`,
@@ -72,10 +52,7 @@ export function buildHomeQueryMessage(result: HomeQueryResult, timezoneOffset: n
 
   if (plantedPlots.length) {
     lines.push('作物：')
-    lines.push(...plantedPlots.slice(0, MAX_PLOT_LINES).map(formatPlot))
-    if (plantedPlots.length > MAX_PLOT_LINES) {
-      lines.push(`…还有 ${plantedPlots.length - MAX_PLOT_LINES} 块作物未展示`)
-    }
+    lines.push(...plantedPlots.map(formatPlot))
   }
 
   return lines.join('\n')
@@ -94,7 +71,7 @@ function formatPet(pet: HomePet) {
     pet.name || '未知精灵',
     pet.level != null ? `Lv.${pet.level}` : '',
     formatGender(pet.gender),
-    pet.mutationType ? '异色' : '',
+    formatMutation(pet),
   ].filter(Boolean)
   return parts.join(' ')
 }
@@ -122,22 +99,10 @@ function buildPlantSummary(
 }
 
 function formatPlot(plot: HomePlot, index: number) {
-  const seedName = getSeedName(plot.seedId)
+  const seedName = getHomePlotName(plot)
   const remain = formatPlotRemain(plot)
   const harvest = plot.harvestNum != null ? `产量 ${plot.harvestNum}` : '产量未知'
-  return `${index + 1}. ${seedName}：${remain} | ${harvest} | 可偷 ${getStealLeft(plot)}`
-}
-
-function flattenPlots(home: HomeInfo) {
-  return (home.lands || []).flatMap(land => land.plots || [])
-}
-
-function isEmptyPlot(plot: HomePlot) {
-  return plot.state === 0 || !plot.seedId
-}
-
-function isRipePlot(plot: HomePlot) {
-  return Boolean(plot.ripTime && plot.ripTime <= Math.floor(Date.now() / 1000))
+  return `${index + 1}. ${seedName}：${remain} | ${harvest} | 可偷 ${getHomeStealLeft(plot)}`
 }
 
 function formatPlotRemain(plot: HomePlot) {
@@ -156,17 +121,17 @@ function formatDurationSeconds(seconds: number) {
   return `${second}秒`
 }
 
-function getStealLeft(plot: HomePlot) {
-  return Math.max(0, (plot.canStealCount || 0) - (plot.stealCount || 0))
-}
-
-function getSeedName(seedId: number | undefined) {
-  return seedId ? SEED_NAMES[seedId] || `种子 ${seedId}` : '空地'
-}
-
 function formatGender(gender: number | undefined) {
   if (gender === 1) return '♂'
   if (gender === 2) return '♀'
+  return ''
+}
+
+function formatMutation(pet: HomePet) {
+  if (pet.mutationName && pet.mutationName !== '普通') return pet.mutationName
+  if (pet.mutationType === 1) return '异色'
+  if (pet.mutationType === 8) return '炫彩'
+  if (pet.mutationType === 9) return '异色炫彩'
   return ''
 }
 

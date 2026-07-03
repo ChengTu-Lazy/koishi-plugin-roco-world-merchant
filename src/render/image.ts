@@ -83,6 +83,7 @@ ${content.join('\n')}
 function formatSource(source: SourceName) {
   if (source === 'onebiji') return 'onebiji 页面源'
   if (source === 'arkmeng') return '洛克万事屋'
+  if (source === 'magicbook') return '洛克魔法书'
   return '咸鱼备用源'
 }
 
