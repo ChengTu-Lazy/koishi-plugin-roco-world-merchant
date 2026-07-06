@@ -2,9 +2,16 @@ import { resolve } from 'node:path'
 
 import { Context, Logger, h } from 'koishi'
 
-import { DEFAULT_WATCH_ITEMS } from './constants'
+import {
+  BACKUP_SOURCE_URL,
+  DEFAULT_ANNOUNCEMENT_PUSH_TIME,
+  DEFAULT_SCHEDULE_TIMES,
+  DEFAULT_WATCH_ITEMS,
+  PRIMARY_SOURCE_URL,
+  ROCOM_API_BASE_URL,
+} from './constants'
 import { ConfigSchema } from './schema'
-import { buildAnnouncementMessage } from './render/announcement'
+import { buildAnnouncementMessage, renderAnnouncementSvgImage } from './render/announcement'
 import { buildHomeAlertMessage, HomeAlertEntry } from './render/home-alert'
 import { renderHomeSvgImage } from './render/home-image'
 import { buildHomeQueryMessage } from './render/home'
@@ -15,7 +22,7 @@ import { AssetCache } from './services/asset-cache'
 import { HomeStore } from './services/home-store'
 import { MerchantStore } from './services/merchant-store'
 import { isValidHomeUid, normalizeHomeUid } from './sources/home'
-import { CacheEntry, Config as PluginConfig, HomeBinding, HomeQueryResult, PushTarget } from './types'
+import { AnnouncementData, CacheEntry, Config as PluginConfig, HomeBinding, HomeQueryResult, PushTarget } from './types'
 import { formatError } from './utils/error'
 import { summarizeHomeAlert } from './utils/home'
 import { formatDateTime, formatLegacyScheduleKey, formatScheduleKey, getLastScheduleTime, getNextScheduleTime, normalizeScheduleTimes, parseHourMinute } from './utils/time'
@@ -29,6 +36,7 @@ export const inject = {
 export const Config = ConfigSchema
 
 export async function apply(ctx: Context, config: PluginConfig) {
+  config = resolveConfigDefaults(config)
   const logger = new Logger(name)
   const stateFile = resolve(ctx.baseDir, 'data', 'roco-world-merchant', 'cache.json')
   const homeStateFile = resolve(ctx.baseDir, 'data', 'roco-world-merchant', 'home-query.json')
@@ -66,14 +74,12 @@ export async function apply(ctx: Context, config: PluginConfig) {
       stateFile: homeStateFile,
     })
     : null
-  const announcementStore = announcementConfig.enabled
-    ? new AnnouncementStore({
-      ctx,
-      logger,
-      config,
-      stateFile: announcementStateFile,
-    })
-    : null
+  const announcementStore = new AnnouncementStore({
+    ctx,
+    logger,
+    config,
+    stateFile: announcementStateFile,
+  })
   const assetCache = new AssetCache({
     ctx,
     logger,
@@ -231,6 +237,46 @@ export async function apply(ctx: Context, config: PluginConfig) {
       logger.warn(`家园查询图片生成失败，已回退文字消息：${formatError(error)}`)
       return text
     }
+  }
+
+  async function buildAnnouncementOutput(data: AnnouncementData) {
+    const text = buildAnnouncementMessage(data, config.timezoneOffset)
+    if (config.outputMode === 'text') {
+      return text
+    }
+
+    try {
+      const image = renderAnnouncementSvgImage(data, config.timezoneOffset)
+      image.svg = await assetCache.inlineSvgImages(image.svg)
+      const buffer = await renderPngWithPuppeteer(ctx, image)
+      const imageTag = h.image(buffer, 'image/png').toString()
+      if (config.outputMode === 'image') {
+        return imageTag
+      }
+      return `${text}\n${imageTag}`
+    } catch (error) {
+      logger.warn(`公告/活动图片生成失败，已回退文字消息：${formatError(error)}`)
+      return text
+    }
+  }
+
+  async function sendAnnouncementToTargets(message: string) {
+    const errors: string[] = []
+    let successCount = 0
+
+    for (const target of config.pushTargets) {
+      try {
+        await sendTargetMessage(target, message, false)
+        successCount += 1
+      } catch (error) {
+        const label = target.name || `${target.platform}:${target.selfId}:${target.channelId}`
+        const detail = `${label} -> ${formatError(error)}`
+        errors.push(detail)
+        logger.warn(`公告/活动推送失败：${detail}`)
+      }
+    }
+
+    return { successCount, errors }
   }
 
   async function handleHomeBind(session: any, rawUid?: string) {
@@ -467,7 +513,7 @@ export async function apply(ctx: Context, config: PluginConfig) {
   }
 
   async function doAnnouncementPush(scheduleTime: Date) {
-    if (!announcementStore || !announcementConfig.enabled || !config.pushTargets.length) {
+    if (!announcementConfig.enabled || !config.pushTargets.length) {
       return
     }
 
@@ -503,21 +549,8 @@ export async function apply(ctx: Context, config: PluginConfig) {
       return
     }
 
-    const message = buildAnnouncementMessage(data, config.timezoneOffset)
-    const errors: string[] = []
-    let successCount = 0
-
-    for (const target of config.pushTargets) {
-      try {
-        await sendTargetMessage(target, message, false)
-        successCount += 1
-      } catch (error) {
-        const label = target.name || `${target.platform}:${target.selfId}:${target.channelId}`
-        const detail = `${label} -> ${formatError(error)}`
-        errors.push(detail)
-        logger.warn(`公告/活动推送失败：${detail}`)
-      }
-    }
+    const message = await buildAnnouncementOutput(data)
+    const { successCount, errors } = await sendAnnouncementToTargets(message)
 
     if (successCount > 0) {
       await announcementStore.rememberPush(scheduleKey, signature)
@@ -530,6 +563,36 @@ export async function apply(ctx: Context, config: PluginConfig) {
     } else {
       logger.info(`公告/活动推送完成：${scheduleKey}`)
     }
+  }
+
+  async function handleManualAnnouncementPush(sendToTargets: boolean, fetchDetails = true) {
+    if (!config.rocomApiKey?.trim()) {
+      return '公告/活动推送需要先配置 rocomApiKey。'
+    }
+
+    if (sendToTargets && !config.pushTargets.length) {
+      return '请先在插件配置中添加 pushTargets，或直接发送“公告活动推送”在当前会话查看。'
+    }
+
+    let data
+    try {
+      data = await announcementStore.fetchLatest({ fetchDetails })
+    } catch (error) {
+      return `公告/活动获取失败：${formatError(error)}`
+    }
+
+    const message = await buildAnnouncementOutput(data)
+    if (!sendToTargets) {
+      return message
+    }
+
+    const { successCount, errors } = await sendAnnouncementToTargets(message)
+    if (!successCount) {
+      return `公告/活动手动推送失败：${errors.join('；') || '没有成功发送的目标'}`
+    }
+
+    const failedText = errors.length ? `，失败 ${errors.length} 个：${errors.join('；')}` : ''
+    return `已手动触发公告/活动推送：成功 ${successCount} 个目标，共 ${data.items.length} 条内容${failedText}`
   }
 
   function scheduleNext() {
@@ -623,6 +686,15 @@ export async function apply(ctx: Context, config: PluginConfig) {
     refreshCommand.alias(...refreshCommandAliases)
   }
 
+  ctx.command('公告活动推送', '手动触发一次公告/活动推送')
+    .option('targets', '-t, --targets 发送到配置的 pushTargets')
+    .option('details', '-d, --details 请求公告详情（手动命令默认开启，保留兼容）')
+    .alias('推送公告活动', '手动推送公告', '手动推送活动')
+    .action(async ({ options }) => handleManualAnnouncementPush(
+      Boolean(options.targets),
+      options.details ? true : undefined,
+    ))
+
   if (config.homeQueryEnabled) {
     const homeCommandName = config.homeCommandName?.trim() || '查家园'
     const homeCommand = ctx.command(`${homeCommandName} [uid:string]`, '查询洛克王国世界家园信息')
@@ -641,5 +713,50 @@ export async function apply(ctx: Context, config: PluginConfig) {
 
     ctx.command('我的家园', '查看当前群/用户绑定的家园 UID')
       .action(async ({ session }) => handleHomeBindingInfo(session))
+  }
+}
+
+function resolveConfigDefaults(config: PluginConfig): PluginConfig {
+  return {
+    ...config,
+    primarySourceUrl: config.primarySourceUrl || PRIMARY_SOURCE_URL,
+    preferredSource: config.preferredSource || 'arkmeng',
+    apiKey: config.apiKey || '',
+    apiBaseUrl: config.apiBaseUrl || BACKUP_SOURCE_URL,
+    rocomApiKey: config.rocomApiKey || '',
+    rocomApiBaseUrl: config.rocomApiBaseUrl || ROCOM_API_BASE_URL,
+    refreshValue: config.refreshValue ?? '',
+    outputMode: config.outputMode || 'both',
+    commandName: config.commandName?.trim() || 'roco-world-merchant',
+    commandAliases: Array.isArray(config.commandAliases) ? config.commandAliases : ['远行商人', '商人'],
+    homeQueryEnabled: config.homeQueryEnabled ?? false,
+    homePreferredSource: config.homePreferredSource || 'arkmeng',
+    homeCommandName: config.homeCommandName?.trim() || '查家园',
+    homeCommandAliases: Array.isArray(config.homeCommandAliases) ? config.homeCommandAliases : ['家园查询'],
+    homeQueryCacheMinutes: config.homeQueryCacheMinutes ?? 5,
+    timezoneOffset: config.timezoneOffset ?? 8,
+    scheduleTimes: config.scheduleTimes?.length ? config.scheduleTimes : DEFAULT_SCHEDULE_TIMES,
+    pushTargets: config.pushTargets || [],
+    requestTimeout: config.requestTimeout ?? 15000,
+    pushOnStartupIfMissed: config.pushOnStartupIfMissed ?? true,
+    startupCatchupWindowMinutes: config.startupCatchupWindowMinutes ?? 30,
+    watch: {
+      enabled: config.watch?.enabled ?? true,
+      items: config.watch?.items?.length ? config.watch.items : DEFAULT_WATCH_ITEMS,
+      mentionAllOnMatch: config.watch?.mentionAllOnMatch ?? true,
+    },
+    announcementPush: {
+      enabled: config.announcementPush?.enabled ?? false,
+      time: config.announcementPush?.time || DEFAULT_ANNOUNCEMENT_PUSH_TIME,
+      mode: config.announcementPush?.mode || 'both',
+      fetchDetails: config.announcementPush?.fetchDetails ?? false,
+      detailLimit: config.announcementPush?.detailLimit ?? 3,
+      onlyNotifyOnChange: config.announcementPush?.onlyNotifyOnChange ?? false,
+    },
+    homeCheck: {
+      enabled: config.homeCheck?.enabled ?? true,
+      mentionUser: config.homeCheck?.mentionUser ?? true,
+      maxBindingsPerTarget: config.homeCheck?.maxBindingsPerTarget ?? 20,
+    },
   }
 }

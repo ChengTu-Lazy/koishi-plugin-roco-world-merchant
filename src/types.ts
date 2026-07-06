@@ -26,6 +26,8 @@ export interface AnnouncementPushConfig {
   enabled: boolean
   time: string
   mode: AnnouncementPushMode
+  fetchDetails: boolean
+  detailLimit: number
   onlyNotifyOnChange: boolean
 }
 
@@ -208,10 +210,16 @@ export interface HomeBinding {
 export interface AnnouncementItem {
   type: '公告' | '活动'
   id?: string
+  detailId?: string
   title: string
   summary?: string
+  publishedAt?: number
+  startAt?: number
+  endAt?: number
   time?: number
   url?: string
+  imageUrls?: string[]
+  urgent?: boolean
   status?: string
 }
 

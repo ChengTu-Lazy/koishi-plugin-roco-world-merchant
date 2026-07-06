@@ -36,6 +36,8 @@
 - 当前实现中，魔法书商人源请求 `refresh=false&random_goods=all`，本地强制刷新只绕过插件缓存，不默认触发魔法书服务端强刷。
 - 插件本地强制刷新只绕过本地缓存，不会自动追加魔法书服务端 `refresh=true`；如后续要增加服务端强刷，应做成显式配置或独立命令。
 - 公告/活动接口属于付费请求相关能力，默认关闭，避免升级后自动产生请求。
+- 公告详情接口 `/api/v1/games/rocom/announcement/detail` 会按公告条数额外产生请求，用于补全详情正文和图片；定时推送只在 `announcementPush.fetchDetails` 开启时调用，手动 `公告活动推送` 默认调用，均受 `detailLimit` 限制。
+- 公告/活动输出会过滤已过期活动；结束时间距当前小于等于 48 小时的活动视为临期活动，需要置顶并在图片卡片中红色加粗展示。
 
 ## 缓存和刷新
 
@@ -80,7 +82,8 @@
 - 旧配置 `scheduleHours` 仍可读取，并会按 `HH:00` 转换。
 - `platform` 兼容 `onebot` 与旧写法 `qq`。
 - `pushTargets.selfId` 可留空；同平台只有一个在线 bot 时会自动选择，否则需要用户配置。
-- `pushTargets.guildId` 主要用于部分频道平台，普通 QQ 群通常可留空。
+- `pushTargets.guildId` 仅作为旧配置兼容字段保留，不再暴露到普通配置界面。
+- `primarySourceUrl`、`apiBaseUrl`、`rocomApiBaseUrl`、`refreshValue`、命令名/别名、时区、超时、启动补推窗口等高级项不再暴露到 Koishi 配置界面；运行时由 `resolveConfigDefaults()` 补默认值，并继续兼容旧数据库配置。
 
 ## 验证命令
 

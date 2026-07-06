@@ -5,6 +5,7 @@ export const DEFAULT_WATCH_ITEMS = [
   '棱镜球',
   '镜面相框',
   '炫彩蛋',
+  '炫彩精灵蛋',
   '首领血脉秘药',
   '祝福项坠',
 ]

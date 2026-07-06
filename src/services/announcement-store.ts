@@ -4,6 +4,7 @@ import { dirname } from 'node:path'
 import { Context, Logger } from 'koishi'
 
 import { fetchAnnouncementData } from '../sources/announcement'
+import { AnnouncementFetchOptions } from '../sources/announcement'
 import { AnnouncementData, Config } from '../types'
 import { formatError } from '../utils/error'
 
@@ -37,9 +38,9 @@ export class AnnouncementStore {
     return this.state.lastSignature
   }
 
-  async fetchLatest() {
+  async fetchLatest(options: AnnouncementFetchOptions = {}) {
     const mode = this.options.config.announcementPush?.mode || 'both'
-    const data = await fetchAnnouncementData(this.options.ctx, this.options.config, mode)
+    const data = await fetchAnnouncementData(this.options.ctx, this.options.config, mode, options)
     this.state.cache = data
     await this.persist()
     return data
@@ -62,8 +63,14 @@ export function createAnnouncementSignature(data: AnnouncementData) {
     .map(item => [
       item.type,
       item.id || item.title,
+      item.publishedAt || '',
+      item.startAt || '',
+      item.endAt || '',
       item.time || '',
+      item.urgent ? 'urgent' : '',
       item.status || '',
+      item.summary || '',
+      (item.imageUrls || []).join(','),
     ].join(':'))
     .join('|')
 }
