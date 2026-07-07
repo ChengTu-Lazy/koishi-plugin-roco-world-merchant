@@ -33,7 +33,7 @@ export const ConfigSchema = Schema.object({
   homeCheck: Schema.object({
     enabled: Schema.boolean()
       .default(true)
-      .description('是否在远行商人定时节点同步检查已绑定 UID 的家园蛋和成熟作物。仅在 homeQueryEnabled 开启且存在绑定时请求。'),
+      .description('是否在定时节点检查已绑定 UID 的家园蛋和成熟作物。未配置 pushTargets 时会按绑定所在群/频道发送提醒。'),
     mentionUser: Schema.boolean()
       .default(true)
       .description('家园提醒命中时是否 @ 绑定用户。'),

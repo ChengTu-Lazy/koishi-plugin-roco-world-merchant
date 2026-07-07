@@ -352,7 +352,7 @@ export async function apply(ctx: Context, config: PluginConfig) {
   }
 
   async function doHomeCheck(scheduleTime: Date, reason: 'schedule' | 'startup') {
-    if (!homeStore || !homeCheckConfig.enabled || !config.pushTargets.length) {
+    if (!homeStore || !homeCheckConfig.enabled) {
       return
     }
 
@@ -367,11 +367,12 @@ export async function apply(ctx: Context, config: PluginConfig) {
       return
     }
 
+    const homeCheckTargets = getHomeCheckTargets(allBindings)
     const queryCache = new Map<string, Promise<HomeQueryResult>>()
     let checkedCount = 0
     let notifiedCount = 0
 
-    for (const target of config.pushTargets) {
+    for (const target of homeCheckTargets) {
       const targetBindings = allBindings
         .filter(binding => isBindingForTarget(binding, target))
         .slice(0, homeCheckConfig.maxBindingsPerTarget)
@@ -418,6 +419,27 @@ export async function apply(ctx: Context, config: PluginConfig) {
       await homeStore.rememberHomeCheck(scheduleKey)
       logger.info(`家园检查完成：${scheduleKey} (${reason})，检查 ${checkedCount} 个绑定，提醒 ${notifiedCount} 个绑定`)
     }
+  }
+
+  function getHomeCheckTargets(bindings: HomeBinding[]) {
+    if (config.pushTargets.length) {
+      return config.pushTargets
+    }
+
+    const targets = new Map<string, PushTarget>()
+    for (const binding of bindings) {
+      const key = `${binding.platform}:${binding.guildId || ''}:${binding.channelId}`
+      if (!targets.has(key)) {
+        targets.set(key, {
+          name: `家园绑定 ${binding.platform}:${binding.channelId}`,
+          platform: binding.platform,
+          selfId: '',
+          channelId: binding.channelId,
+          guildId: binding.guildId,
+        })
+      }
+    }
+    return [...targets.values()]
   }
 
   function queryBoundHome(binding: HomeBinding, queryCache: Map<string, Promise<HomeQueryResult>>) {
