@@ -53,11 +53,12 @@ export class AssetCache {
   }
 
   private async getImageDataUri(url: string) {
-    const mimeType = guessImageMimeType(url)
-    const file = this.getCacheFile(url, mimeType)
+    const guessedMimeType = guessImageMimeType(url)
+    const file = this.getCacheFile(url, guessedMimeType)
     let buffer = await readFile(file).catch(() => null)
+    let mimeType = buffer ? detectImageMimeType(buffer) : undefined
 
-    if (!buffer) {
+    if (!buffer || !mimeType) {
       const raw = await this.options.ctx.http.get(url, {
         timeout: this.options.config.requestTimeout,
         responseType: 'arraybuffer',
@@ -69,8 +70,21 @@ export class AssetCache {
       if (buffer.length > MAX_ASSET_BYTES) {
         throw new Error(`image too large: ${buffer.length} bytes`)
       }
+      mimeType = detectImageMimeType(buffer) || guessedMimeType
+      if (!mimeType) {
+        throw new Error('unsupported image format')
+      }
       await mkdir(this.options.cacheDir, { recursive: true })
       await writeFile(file, buffer)
+    }
+
+    if (buffer.length > MAX_ASSET_BYTES) {
+      throw new Error(`cached image too large: ${buffer.length} bytes`)
+    }
+
+    mimeType ||= guessedMimeType
+    if (!mimeType) {
+      throw new Error('unsupported image format')
     }
 
     return `data:${mimeType};base64,${buffer.toString('base64')}`
@@ -89,10 +103,20 @@ function guessImageMimeType(url: string) {
   if (ext === '.webp') return 'image/webp'
   if (ext === '.gif') return 'image/gif'
   if (ext === '.svg') return 'image/svg+xml'
-  return 'image/png'
+  try {
+    const format = new URL(url).searchParams.get('wx_fmt')?.toLowerCase()
+    if (format === 'jpg' || format === 'jpeg') return 'image/jpeg'
+    if (format === 'webp') return 'image/webp'
+    if (format === 'gif') return 'image/gif'
+    if (format === 'svg') return 'image/svg+xml'
+    if (format === 'png') return 'image/png'
+  } catch {
+    // 由文件内容继续识别。
+  }
+  return undefined
 }
 
-function getExtension(url: string, mimeType: string) {
+function getExtension(url: string, mimeType?: string) {
   const ext = extname(safeUrlPathname(url)).toLowerCase()
   if (['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'].includes(ext)) {
     return ext
@@ -101,7 +125,53 @@ function getExtension(url: string, mimeType: string) {
   if (mimeType === 'image/webp') return '.webp'
   if (mimeType === 'image/gif') return '.gif'
   if (mimeType === 'image/svg+xml') return '.svg'
-  return '.png'
+  return '.img'
+}
+
+function detectImageMimeType(buffer: Buffer) {
+  if (buffer.length >= 8
+    && buffer[0] === 0x89
+    && buffer[1] === 0x50
+    && buffer[2] === 0x4e
+    && buffer[3] === 0x47
+    && buffer[4] === 0x0d
+    && buffer[5] === 0x0a
+    && buffer[6] === 0x1a
+    && buffer[7] === 0x0a) {
+    return 'image/png'
+  }
+
+  if (buffer.length >= 3
+    && buffer[0] === 0xff
+    && buffer[1] === 0xd8
+    && buffer[2] === 0xff) {
+    return 'image/jpeg'
+  }
+
+  if (buffer.length >= 6) {
+    const signature = buffer.subarray(0, 6).toString('ascii')
+    if (signature === 'GIF87a' || signature === 'GIF89a') {
+      return 'image/gif'
+    }
+  }
+
+  if (buffer.length >= 12
+    && buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+    && buffer.subarray(8, 12).toString('ascii') === 'WEBP') {
+    return 'image/webp'
+  }
+
+  if (buffer.length >= 12 && buffer.subarray(4, 8).toString('ascii') === 'ftyp') {
+    const brand = buffer.subarray(8, 12).toString('ascii')
+    if (brand === 'avif' || brand === 'avis') return 'image/avif'
+  }
+
+  const text = buffer.subarray(0, 4096).toString('utf8').replace(/^\uFEFF/, '').trimStart()
+  if (/^(?:<\?xml[^>]*>\s*)?<svg(?:\s|>)/i.test(text)) {
+    return 'image/svg+xml'
+  }
+
+  return undefined
 }
 
 function safeUrlPathname(url: string) {
