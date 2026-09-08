@@ -11,7 +11,8 @@ import {
   ROCOM_API_BASE_URL,
 } from './constants'
 import { ConfigSchema } from './schema'
-import { buildAnnouncementMessage, renderAnnouncementSvgImage } from './render/announcement'
+import { buildAnnouncementMessage, renderAnnouncementPages } from './render/announcement'
+import { fetchAnnouncementMedia } from './sources/announcement'
 import { buildHomeAlertMessage, HomeAlertEntry } from './render/home-alert'
 import { renderHomeSvgImage } from './render/home-image'
 import { buildHomeQueryMessage } from './render/home'
@@ -246,10 +247,13 @@ export async function apply(ctx: Context, config: PluginConfig) {
     }
 
     try {
-      const image = renderAnnouncementSvgImage(data, config.timezoneOffset)
-      image.svg = await assetCache.inlineSvgImages(image.svg)
-      const buffer = await renderPngWithPuppeteer(ctx, image)
-      const imageTag = h.image(buffer, 'image/png').toString()
+      const tags: string[] = []
+      for (const image of renderAnnouncementPages(data, config.timezoneOffset)) {
+        image.svg = await assetCache.inlineSvgImages(image.svg)
+        const buffer = await renderPngWithPuppeteer(ctx, image)
+        tags.push(h.image(buffer, 'image/png').toString())
+      }
+      const imageTag = tags.join('\n')
       if (config.outputMode === 'image') {
         return imageTag
       }
@@ -716,6 +720,25 @@ export async function apply(ctx: Context, config: PluginConfig) {
       Boolean(options.targets),
       options.details ? true : undefined,
     ))
+
+  ctx.command('公告素材 [id:string]', '获取公告原图、视频和链接（默认最新公告）')
+    .alias('公告资源')
+    .action(async (_, id) => {
+      try {
+        const media = await fetchAnnouncementMedia(ctx, config, id)
+        const lines = [`【公告素材】${media.title}`, `公告 ID：${media.id}`]
+        for (const [label, urls] of [['图片', media.images], ['视频', media.videos], ['链接', media.links]] as const) {
+          lines.push(`${label}：${urls.length} 个`)
+          urls.forEach((url, index) => lines.push(`${index + 1}. ${url}`))
+        }
+        if (!media.images.length && !media.videos.length && !media.links.length) {
+          lines.push('这条公告没有可提取的图片、视频或链接。')
+        }
+        return h.text(lines.join('\n')).toString()
+      } catch (error) {
+        return `公告素材获取失败：${formatError(error)}`
+      }
+    })
 
   if (config.homeQueryEnabled) {
     const homeCommandName = config.homeCommandName?.trim() || '查家园'

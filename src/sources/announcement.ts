@@ -6,6 +6,7 @@ import { formatError } from '../utils/error'
 import { normalizeTimestampMs } from '../utils/parse'
 
 const LATEST_ANNOUNCEMENT_PATH = '/api/v1/games/rocom/announcement/latest'
+const ANNOUNCEMENT_LIST_PATH = '/api/v1/games/rocom/announcement/list'
 const ANNOUNCEMENT_DETAIL_PATH = '/api/v1/games/rocom/announcement/detail'
 const ACTIVITIES_INFO_PATH = '/api/v1/games/rocom/activities/info'
 const DEFAULT_DETAIL_LIMIT = 3
@@ -110,6 +111,12 @@ const DIRECT_IMAGE_KEYS = [
   'share_img',
   'shareImg',
 ]
+const IMAGE_PREVIEW_KEYS = [
+  'imagePreviewUrl',
+  'image_preview_url',
+  'previewUrl',
+  'preview_url',
+]
 const IMAGE_LIST_KEYS = [
   'images',
   'imageUrls',
@@ -150,10 +157,16 @@ export async function fetchAnnouncementData(
 
   if (mode === 'announcement' || mode === 'both') {
     try {
-      const data = await callRocomApi(ctx, config, LATEST_ANNOUNCEMENT_PATH)
+      const data = await callRocomApi(ctx, config, ANNOUNCEMENT_LIST_PATH, { page: 1, limit: 10 })
       items.push(...normalizeItems(data, '公告', baseUrl))
     } catch (error) {
-      warnings.push(`最新公告获取失败：${formatError(error)}`)
+      warnings.push(`公告列表获取失败，尝试最新公告：${formatError(error)}`)
+      try {
+        const data = await callRocomApi(ctx, config, LATEST_ANNOUNCEMENT_PATH)
+        items.push(...normalizeItems(data, '公告', baseUrl))
+      } catch (error) {
+        warnings.push(`最新公告获取失败：${formatError(error)}`)
+      }
     }
   }
 
@@ -189,6 +202,52 @@ export async function fetchAnnouncementData(
     items: visibleItems,
     warnings: warnings.length ? warnings : undefined,
   }
+}
+
+export async function fetchAnnouncementMedia(ctx: Context, config: Config, id?: string) {
+  if (id && !/^\d+$/.test(id)) throw new Error('公告 ID 必须是数字，请从公告卡片中复制 ID。')
+  if (!id) {
+    const latest = await callRocomApi(ctx, config, LATEST_ANNOUNCEMENT_PATH)
+    id = normalizeItems(latest, '公告', config.rocomApiBaseUrl)[0]?.detailId
+  }
+  if (!id) throw new Error('未获取到公告 ID')
+  const detail = resolveDetailRecord(await callRocomApi(ctx, config, ANNOUNCEMENT_DETAIL_PATH, { thread_id: id }))
+  return { id, title: readFirstString(detail, ['title', 'name']), ...extractAnnouncementMedia(detail, config.rocomApiBaseUrl) }
+}
+
+export function extractAnnouncementMedia(record: Record<string, unknown>, baseUrl: string) {
+  const images = new Set<string>()
+  const videos = new Set<string>()
+  const links = new Set<string>()
+  const add = (set: Set<string>, value: string) => {
+    const decoded = decodeHtmlEntities(value).trim()
+    // 资源标识符如 10002/260831/xxx.jpg 不是可直接访问的链接。
+    if (!/^(https?:\/\/|\/\/)/i.test(decoded)) return
+    const url = normalizeUrl(decoded, baseUrl)
+    if (url) set.add(url)
+  }
+  const walk = (value: unknown, key = '', depth = 0) => {
+    if (depth > 10 || value == null) return
+    if (Array.isArray(value)) return value.forEach(child => walk(child, key, depth + 1))
+    if (typeof value === 'object') {
+      for (const [name, child] of Object.entries(value)) {
+        if (name === 'author') continue
+        walk(child, name, depth + 1)
+      }
+      return
+    }
+    if (typeof value !== 'string') return
+    if (/^(imageUrl|image_url|images|image|pic|picture)$/i.test(key)) add(images, value)
+    if (/^(video|videos|videoUrl|video_url|playUrl|play_url)$/i.test(key)) add(videos, value)
+    if (/^(url|link|href|jumpUrl|jump_url)$/i.test(key)) add(links, value)
+    for (const match of value.matchAll(/<(img|video|source|a)\b[^>]*?\s(?:src|href|data-src)\s*=\s*(["'])(.*?)\2/gi)) {
+      add(match[1].toLowerCase() === 'img' ? images : match[1].toLowerCase() === 'a' ? links : videos, match[3])
+    }
+    for (const match of value.matchAll(/(!?)\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/g)) add(match[1] ? images : links, match[2])
+  }
+  walk(record)
+  if (!images.size) collectImageUrls(record, baseUrl).forEach(url => add(images, url))
+  return { images: [...images], videos: [...videos], links: [...links].filter(url => !images.has(url) && !videos.has(url)) }
 }
 
 function normalizeItems(value: unknown, type: AnnouncementItem['type'], baseUrl: string) {
@@ -237,9 +296,27 @@ function normalizeItem(record: Record<string, unknown>, type: AnnouncementItem['
       ? publishedAt || readTime(record, ['created_at', 'createdAt', 'updated_at', 'updatedAt', 'time', 'tt'])
       : startAt || publishedAt || readTime(record, ['created_at', 'createdAt', 'updated_at', 'updatedAt', 'time', 'tt']),
     url: normalizeUrl(readFirstString(record, ['url', 'link', 'jump_url', 'jumpUrl', 'href']), baseUrl),
-    imageUrls: normalizeImageList(collectImageUrls(record, baseUrl)),
+    imageUrls: normalizeImageList([
+      ...collectImageUrls(record, baseUrl),
+      ...(type === '活动' ? collectActivityImages(record, baseUrl) : []),
+    ]),
     status: readFirstString(record, ['status', 'state', 'tag']),
   }
+}
+
+function collectActivityImages(record: Record<string, unknown>, baseUrl: string) {
+  const urls: string[] = []
+  for (const key of ['get_props', 'get_pets', 'get_extra_props']) {
+    const entries = record[key]
+    if (!Array.isArray(entries)) continue
+    for (const entry of entries) {
+      const image = readFirstString(asRecord(entry), ['icon_url', 'main_url', 'image_url', 'imageUrl', 'cover_url'])
+      if (!image) continue
+      const url = normalizeUrl(decodeHtmlEntities(image), baseUrl)
+      if (url) urls.push(url)
+    }
+  }
+  return urls
 }
 
 async function enrichAnnouncementDetails(
@@ -553,6 +630,16 @@ function collectImagesFromValue(value: unknown, baseUrl: string, result: Set<str
   for (const key of DIRECT_IMAGE_KEYS) {
     collectImageValue(record[key], baseUrl, result)
   }
+
+  // 详情接口同时返回预览图和原图。预览图足够用于公告卡片，优先使用它，
+  // 避免多个几 MB 的原图同时内嵌到 SVG 后导致 Chromium 解码失败。
+  const previewImages = new Set<string>()
+  collectPreviewImagesFromValue(record, baseUrl, previewImages)
+  if (previewImages.size) {
+    previewImages.forEach(url => result.add(url))
+    return
+  }
+
   for (const key of IMAGE_LIST_KEYS) {
     collectImageValue(record[key], baseUrl, result)
   }
@@ -564,6 +651,25 @@ function collectImagesFromValue(value: unknown, baseUrl: string, result: Set<str
   }
   for (const key of MEDIA_CONTAINER_KEYS) {
     collectImagesFromValue(record[key], baseUrl, result, depth + 1)
+  }
+}
+
+function collectPreviewImagesFromValue(value: unknown, baseUrl: string, result: Set<string>, depth = 0) {
+  if (depth > 4 || value == null) return
+
+  if (Array.isArray(value)) {
+    value.forEach(item => collectPreviewImagesFromValue(item, baseUrl, result, depth + 1))
+    return
+  }
+
+  const record = asRecord(value)
+  if (!Object.keys(record).length) return
+
+  for (const key of IMAGE_PREVIEW_KEYS) {
+    collectImageValue(record[key], baseUrl, result)
+  }
+  for (const key of MEDIA_CONTAINER_KEYS) {
+    collectPreviewImagesFromValue(record[key], baseUrl, result, depth + 1)
   }
 }
 
