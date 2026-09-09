@@ -35,6 +35,7 @@
 - `announcementPush.enabled`: 是否启用公告/活动推送，默认关闭。
 - `announcementPush.fetchDetails`: 定时推送是否额外请求公告详情以补全文本和图片，默认关闭。
 - `announcementPush.detailLimit`: 每次最多补全几条公告详情，默认 `3`。
+- `announcementPush.recentDays`: 可填写任意非负整数，公告展示最近几天，默认 `3`；`1` 表示今天，`3` 表示今天及前两天，`0` 表示不限。按插件时区计算，仅筛选首页最多 10 条公告；日期缺失时不展示（不限天数时保留）。手动查询和定时推送均生效，不影响活动或公告素材查询。
 - `watch.enabled`: 是否启用关注物品提醒，默认开启。
 - `watch.items`: 关注物品列表，可自行增删。
 - `watch.mentionAllOnMatch`: 命中关注物品后是否尝试 `@全体成员`，默认开启。

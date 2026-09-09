@@ -28,6 +28,7 @@ export interface AnnouncementPushConfig {
   mode: AnnouncementPushMode
   fetchDetails: boolean
   detailLimit: number
+  recentDays: number
   onlyNotifyOnChange: boolean
 }
 

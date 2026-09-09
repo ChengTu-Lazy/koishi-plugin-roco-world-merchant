@@ -796,6 +796,7 @@ function resolveConfigDefaults(config: PluginConfig): PluginConfig {
       mode: config.announcementPush?.mode || 'both',
       fetchDetails: config.announcementPush?.fetchDetails ?? false,
       detailLimit: config.announcementPush?.detailLimit ?? 3,
+      recentDays: config.announcementPush?.recentDays ?? 3,
       onlyNotifyOnChange: config.announcementPush?.onlyNotifyOnChange ?? false,
     },
     homeCheck: {

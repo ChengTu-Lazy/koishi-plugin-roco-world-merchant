@@ -67,9 +67,11 @@ export const ConfigSchema = Schema.object({
       .description('每天检查公告/活动的时间，格式为 HH:mm。默认 10:00。'),
     mode: Schema.union([
       Schema.const('activities').description('仅活动信息，通常 1 次接口请求'),
-      Schema.const('announcement').description('仅最新公告，通常 1 次接口请求'),
+      Schema.const('announcement').description('仅公告列表，通常 1 次接口请求'),
       Schema.const('both').description('公告 + 活动，通常 2 次接口请求'),
     ]).default('both').description('公告/活动推送内容范围。'),
+    recentDays: Schema.number().min(0).step(1).default(3)
+      .description('公告展示最近几天（包含今天，按插件时区计算），默认 3 天，0 表示不限。仅筛选列表首页最多 10 条公告；日期缺失的公告在启用限制时不展示，不影响活动。'),
     fetchDetails: Schema.boolean()
       .default(false)
       .description('定时推送是否额外请求公告详情以补全文本和图片。会按公告条数增加付费请求，默认关闭。'),
@@ -85,6 +87,7 @@ export const ConfigSchema = Schema.object({
     mode: 'both',
     fetchDetails: false,
     detailLimit: 3,
+    recentDays: 3,
     onlyNotifyOnChange: false,
   }).description('公告/活动定时推送配置。'),
   watch: Schema.object({

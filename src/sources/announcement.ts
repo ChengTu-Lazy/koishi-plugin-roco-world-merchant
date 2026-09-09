@@ -4,6 +4,7 @@ import { callRocomApi } from './rocom-api'
 import { AnnouncementData, AnnouncementItem, AnnouncementPushMode, Config } from '../types'
 import { formatError } from '../utils/error'
 import { normalizeTimestampMs } from '../utils/parse'
+import { filterRecentAnnouncements } from '../utils/announcement-range'
 
 const LATEST_ANNOUNCEMENT_PATH = '/api/v1/games/rocom/announcement/latest'
 const ANNOUNCEMENT_LIST_PATH = '/api/v1/games/rocom/announcement/list'
@@ -183,7 +184,10 @@ export async function fetchAnnouncementData(
     throw new Error(warnings.join('；'))
   }
 
-  const dedupedItems = dedupeItems(items)
+  const now = Date.now()
+  const dedupedItems = filterRecentAnnouncements(
+    dedupeItems(items), config.announcementPush?.recentDays, now, config.timezoneOffset,
+  )
   const shouldFetchDetails = options.fetchDetails ?? config.announcementPush?.fetchDetails ?? false
   if (shouldFetchDetails) {
     await enrichAnnouncementDetails(
@@ -194,7 +198,7 @@ export async function fetchAnnouncementData(
       warnings,
     )
   }
-  const visibleItems = prepareVisibleItems(dedupedItems, Date.now())
+  const visibleItems = prepareVisibleItems(dedupedItems, now)
 
   return {
     fetchedAt: Date.now(),
