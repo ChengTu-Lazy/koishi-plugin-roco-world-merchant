@@ -27,7 +27,7 @@
 ## 常用配置
 
 - `preferredSource`: 远行商人默认数据源，默认 `arkmeng`。可选 `arkmeng`、`onebiji`、`magicbook`、`xianyuw`。
-- `rocomApiKey`: 洛克魔法书开放 API Key。使用魔法书数据源、公告/活动推送或魔法书家园源时需要填写；查蛋填写后优先请求魔法书接口，留空使用内置数据。
+- `rocomApiKey`: 洛克魔法书开放 API Key。使用魔法书数据源、公告/活动推送或魔法书家园源时需要填写；查蛋名称查询及尺寸反查的魔法书备用源也使用此 Key。
 - `apiKey`: 咸鱼备用源 API Key，可不填。
 - `outputMode`: 输出模式，可选 `both`、`text`、`image`，默认 `both`。
 - `scheduleTimes`: 远行商人推送时间，默认 `08:05`、`12:05`、`16:05`、`20:05`。
@@ -63,7 +63,7 @@
 - `查蛋 喵喵`: 查询精灵蛋组、孵化尺寸和可配种精灵。
 - `查蛋 0.18 1.5`: 按身高（米）、体重（千克）反查精灵；也支持 `查蛋 身高0.18m 体重1.5kg`。
 - `查蛋 0.18`、`查蛋 体重1.5kg`: 仅按身高或体重反查。匹配度表示尺寸符合程度，不代表真实孵出概率。
-- 查蛋不需要绑定 UID；未填写 `rocomApiKey` 时使用内置数据，填写后优先查询洛克魔法书，接口失败自动回退内置数据。
+- 查蛋不需要绑定 UID；输入身高和体重时优先使用免 Key 的 BWIKI 工具站，显示参考概率、尺寸匹配度和置信度，默认不限定蛋种。接口失败后尝试魔法书（需 `rocomApiKey`）及内置数据，并提示备用数据可能不完整。名称和单尺寸查询保留原有数据源。
 
 ## 家园查询
 
@@ -84,6 +84,8 @@
 ## 鸣谢
 
 查蛋功能参考 [Entropy-Increase-Team/koishi-plugin-rocom](https://github.com/Entropy-Increase-Team/koishi-plugin-rocom) 的交互与接口，内置查蛋数据摘录自该项目。数据来源、版本和许可见 `THIRD-PARTY-NOTICES.md` 与 `LICENSE.egg-data`。
+
+尺寸反查使用 [BWIKI 工具站](https://roco.gptvip.chat/hatch-query) 的公开接口，接入方式参考 [OatmeaILL/zhenxun_roco_egg_query](https://github.com/OatmeaILL/zhenxun_roco_egg_query)。
 
 感谢 `洛克万事屋` 及其作者对本插件的支持。
 

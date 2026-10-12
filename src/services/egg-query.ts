@@ -3,6 +3,7 @@ import { Context, Logger } from 'koishi'
 import { eggRows } from '../data/egg-data'
 import { callRocomApi } from '../sources/rocom-api'
 import { resolvePetIconUrl } from '../sources/pet-icons'
+import { fetchBwikiEgg } from '../sources/egg'
 import { Config } from '../types'
 
 const groups = ['未知', '未发现', '怪兽', '两栖', '虫', '飞行', '陆上', '妖精', '植物', '人型', '软体', '矿物', '不定形', '鱼', '龙', '机械']
@@ -17,6 +18,9 @@ export interface EggCard {
   height: string
   weight: string
   score?: number
+  scoreLabel?: string
+  fitScore?: number
+  confidence?: string
   matchLabel?: string
   sizeClass?: string
   hatch?: string
@@ -27,6 +31,7 @@ export interface EggResult {
   lines: string[]
   query?: { height?: number; weight?: number }
   source?: string
+  notice?: string
   pet?: EggCard
   sections?: EggSection[]
 }
@@ -230,6 +235,22 @@ function apiSizeResult(response: any, query: { height?: number; weight?: number 
 }
 
 export async function queryEgg(ctx: Context, config: Config, logger: Logger, query: EggQuery): Promise<EggResult> {
+  let primaryFailed = false
+  if (!('name' in query) && query.height != null && query.weight != null) {
+    try {
+      return await fetchBwikiEgg(ctx, config, { height: query.height, weight: query.weight })
+    } catch (error) {
+      primaryFailed = true
+      logger.warn('BWIKI 查蛋接口不可用，尝试备用数据源：%s', error instanceof Error ? error.message : String(error))
+    }
+  }
+  const withSourceNotice = (result: EggResult) => {
+    if (!primaryFailed) return result
+    result.notice = '主源暂不可用，备用数据可能不完整，结果仅供参考。'
+    result.source = `${result.source || '备用数据'}（主源不可用）`
+    result.lines.push(result.notice)
+    return result
+  }
   if (config.rocomApiKey?.trim()) {
     if (!('name' in query) && query.height != null && query.weight != null) {
       for (const path of ['/api/v1/games/rocom/egg/search', '/api/v1/games/rocom/wiki/pet-size/query']) {
@@ -237,7 +258,7 @@ export async function queryEgg(ctx: Context, config: Config, logger: Logger, que
           const params = path.endsWith('/egg/search')
             ? { height: query.height, weight: query.weight, page_no: 1, page_size: 30 }
             : { diameter: query.height, weight: query.weight, pool: 'magic', include_display_only: false, page_no: 1, page_size: 30 }
-          return apiSizeResult(await callRocomApi(ctx, config, path, params), query)
+          return withSourceNotice(apiSizeResult(await callRocomApi(ctx, config, path, params), query))
         } catch (error) {
           logger.warn('查蛋尺寸接口不可用，尝试下一数据源：%s', error instanceof Error ? error.message : String(error))
         }
@@ -269,5 +290,5 @@ export async function queryEgg(ctx: Context, config: Config, logger: Logger, que
       }
     }
   }
-  return queryLocalEgg(query)
+  return withSourceNotice(queryLocalEgg(query))
 }

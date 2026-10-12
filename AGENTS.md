@@ -44,7 +44,8 @@
 ## 缓存和刷新
 
 - 查蛋指令为 `查蛋 [...args:string]`，独立于家园查询开关，不要求 UID。身高输入为米、体重为千克；本地数据内部为厘米、克。
-- 配置 `rocomApiKey` 后，双尺寸反查按 `/egg/search` → `/wiki/pet-size/query` → 内置快照回退；成功空结果不回退。名称查询使用 `/egg/pet-groups`、`/egg/group-pets`，失败回退本地。单尺寸查询使用本地数据，不请求付费接口。
+- 双尺寸反查优先免 key 请求 BWIKI 工具站 `https://roco.gptvip.chat/api/magic-egg-lookup?height_m=...&weight_kg=...`，只传尺寸，不默认指定蛋种。失败后按魔法书 `/egg/search` → `/wiki/pet-size/query`（需 `rocomApiKey`）→ 内置快照回退；成功空结果不回退。备用结果标明主源不可用及数据可能不完整。名称查询使用 `/egg/pet-groups`、`/egg/group-pets`，失败回退本地。单尺寸查询使用本地数据，不请求付费接口。
+- BWIKI 返回的 `match_probability` 为参考概率，`fit_score` 为尺寸匹配度，`confidence_text` 为置信度，三者不得混用。卡片分别展示；接口没有提供尺寸区间时，不使用旧快照补造区间。`scripts/fixtures/bwiki-egg-027-3151.json` 为未指定蛋种的实测响应摘录，含用户提供的13只及诅咒狼灵，共14只；它不等同于同乘蛋池的13只结果。
 - 内置查蛋数据位于 `src/data/egg-data.ts`，来源提交及许可见 `THIRD-PARTY-NOTICES.md`、`LICENSE.egg-data`；构建时打入 JS，无运行时远程下载。本地尺寸匹配度为区间符合程度（范围外15%容差），不是归一化孵出概率。
 - `src/services/egg-query.ts` 实现输入解析和数据源回退；`src/render/egg.ts` 生成分页 SVG，复用 Puppeteer 和 outputMode，渲染失败回退文字。
 - 查蛋结果使用结构化 `EggCard`、`EggSection` 渲染双列卡片，每页最多8只；顶部突出输入尺寸，候选显示图标、匹配度和尺寸区间，名称查询显示精灵档案。图标优先使用接口 URL，缺失时按精灵 ID 构造官方图标；发送前经 AssetCache 内联为 data URI，失败时保留文字占位。
