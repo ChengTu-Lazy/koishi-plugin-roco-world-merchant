@@ -18,6 +18,8 @@ import { renderHomeSvgImage } from './render/home-image'
 import { buildHomeQueryMessage } from './render/home'
 import { buildMessage } from './render/message'
 import { renderPngWithPuppeteer } from './render/puppeteer'
+import { eggResultText, renderEggPages } from './render/egg'
+import { EGG_USAGE, parseEggQuery, queryEgg } from './services/egg-query'
 import { AnnouncementStore, createAnnouncementSignature } from './services/announcement-store'
 import { AssetCache } from './services/asset-cache'
 import { HomeStore } from './services/home-store'
@@ -689,6 +691,29 @@ export async function apply(ctx: Context, config: PluginConfig) {
     cancelNextAnnouncementPush?.()
     cancelNextAnnouncementPush = null
   })
+
+  ctx.command('查蛋 [...args:string]', '查询精灵蛋组或按身高体重反查精灵')
+    .action(async (_, ...args) => {
+      if (!args.length) return EGG_USAGE
+      try {
+        const result = await queryEgg(ctx, config, logger, parseEggQuery(args))
+        const text = h.text(eggResultText(result)).toString()
+        if (config.outputMode === 'text') return text
+        try {
+          const images: string[] = []
+          for (const page of renderEggPages(result)) {
+            const svg = await assetCache.inlineSvgImages(page.svg)
+            images.push(h.image(await renderPngWithPuppeteer(ctx, { ...page, svg }), 'image/png').toString())
+          }
+          return config.outputMode === 'image' ? images.join('') : `${text}\n${images.join('')}`
+        } catch (error) {
+          logger.warn('查蛋图片渲染失败，回退文字：%s', formatError(error))
+          return text
+        }
+      } catch (error) {
+        return h.text(formatError(error)).toString()
+      }
+    })
 
   const command = ctx.command(config.commandName, '获取洛克王国世界远行商人数据')
     .option('refresh', '-f, --refresh 强制刷新并绕过缓存')

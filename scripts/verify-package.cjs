@@ -8,7 +8,7 @@ const cwd = path.dirname(pkgPath)
 
 const mainFile = normalizePath(pkg.main)
 const typingsFile = normalizePath(pkg.typings)
-const requiredFiles = [mainFile, typingsFile]
+const requiredFiles = [mainFile, typingsFile, 'LICENSE.egg-data', 'THIRD-PARTY-NOTICES.md']
 
 for (const file of requiredFiles) {
   const resolved = path.resolve(cwd, file)

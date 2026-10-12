@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-roco-world-merchant",
-  "description": "推送洛克王国世界远行商人数据，支持公告/活动推送、家园查询与绑定提醒",
-  "version": "0.1.17",
+  "description": "推送洛克王国世界远行商人数据，支持公告/活动推送、家园查询、查蛋与绑定提醒",
+  "version": "0.1.18",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "homepage": "https://github.com/ChengTu-Lazy/koishi-plugin-roco-world-merchant#readme",
@@ -14,7 +14,9 @@
   },
   "files": [
     "lib",
-    "dist"
+    "dist",
+    "LICENSE.egg-data",
+    "THIRD-PARTY-NOTICES.md"
   ],
   "license": "MIT",
   "publishConfig": {
@@ -43,7 +45,7 @@
   },
   "koishi": {
     "description": {
-      "zh": "推送洛克王国世界远行商人数据，支持公告/活动推送、家园查询与绑定提醒"
+      "zh": "推送洛克王国世界远行商人数据，支持公告/活动推送、家园查询、查蛋与绑定提醒"
     },
     "service": {
       "required": [

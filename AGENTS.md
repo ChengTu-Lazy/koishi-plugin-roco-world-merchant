@@ -43,6 +43,12 @@
 
 ## 缓存和刷新
 
+- 查蛋指令为 `查蛋 [...args:string]`，独立于家园查询开关，不要求 UID。身高输入为米、体重为千克；本地数据内部为厘米、克。
+- 配置 `rocomApiKey` 后，双尺寸反查按 `/egg/search` → `/wiki/pet-size/query` → 内置快照回退；成功空结果不回退。名称查询使用 `/egg/pet-groups`、`/egg/group-pets`，失败回退本地。单尺寸查询使用本地数据，不请求付费接口。
+- 内置查蛋数据位于 `src/data/egg-data.ts`，来源提交及许可见 `THIRD-PARTY-NOTICES.md`、`LICENSE.egg-data`；构建时打入 JS，无运行时远程下载。本地尺寸匹配度为区间符合程度（范围外15%容差），不是归一化孵出概率。
+- `src/services/egg-query.ts` 实现输入解析和数据源回退；`src/render/egg.ts` 生成分页 SVG，复用 Puppeteer 和 outputMode，渲染失败回退文字。
+- 查蛋结果使用结构化 `EggCard`、`EggSection` 渲染双列卡片，每页最多8只；顶部突出输入尺寸，候选显示图标、匹配度和尺寸区间，名称查询显示精灵档案。图标优先使用接口 URL，缺失时按精灵 ID 构造官方图标；发送前经 AssetCache 内联为 data URI，失败时保留文字占位。
+
 - 远行商人缓存文件位于 `data/roco-world-merchant/cache.json`。
 - 家园查询状态位于 `data/roco-world-merchant/home-query.json`。
 - 公告/活动状态位于 `data/roco-world-merchant/announcement.json`。
@@ -101,6 +107,8 @@ npm run build
 npm run verify:pack
 git diff --check
 ```
+
+查蛋功能改动还需运行 `node scripts/test-egg-query.cjs`，覆盖解析、内置数据、接口回退及分页；测试不请求线上付费 API。
 
 如果只改 README 或 AGENTS.md，可至少运行：
 

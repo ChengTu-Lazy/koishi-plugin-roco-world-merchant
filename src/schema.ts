@@ -17,7 +17,7 @@ export const ConfigSchema = Schema.object({
   apiKey: Schema.string().default('').description('咸鱼备用数据源的 API key，可留空。'),
   rocomApiKey: Schema.string()
     .default('')
-    .description('洛克魔法书开放 API 的 X-API-Key，用于公告/活动等付费接口；不填写时不会请求这些接口。'),
+    .description('洛克魔法书开放 API 的 X-API-Key，用于公告/活动及查蛋等接口；查蛋填写后优先请求 API，不填写时使用内置数据。'),
   outputMode: Schema.union([
     Schema.const('both').description('文字 + 图片'),
     Schema.const('text').description('仅文字'),
