@@ -43,13 +43,19 @@ export class AssetCache {
     }))
 
     let inlined = svg
-    for (const entry of entries) {
-      if (!entry) continue
+    const failed: string[] = []
+    for (let index = 0; index < hrefs.length; index++) {
+      const entry = entries[index]
+      if (!entry) {
+        failed.push(hrefs[index])
+        continue
+      }
       const [href, dataUri] = entry
       inlined = inlined.split(href).join(dataUri)
     }
 
-    return inlined
+    // 取不到素材时删掉对应的 <image>，让底层文字占位显示出来，避免浏览器画出破图图标。
+    return failed.length ? stripImageTags(inlined, failed) : inlined
   }
 
   private async getImageDataUri(url: string) {
@@ -189,4 +195,13 @@ function decodeXmlAttribute(value: string) {
     .replace(/&apos;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
+}
+
+/** 删除 href 命中失败列表的 <image> 标签，标签内其他属性一并移除。 */
+function stripImageTags(svg: string, hrefs: string[]) {
+  const targets = new Set(hrefs)
+  return svg.replace(/<image\b[^>]*?\/?>/g, tag => {
+    const href = /(?:href|xlink:href)=["']([^"']*)["']/.exec(tag)?.[1]
+    return href && targets.has(href) ? '' : tag
+  })
 }

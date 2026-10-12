@@ -47,8 +47,14 @@
 - 双尺寸反查优先免 key 请求 BWIKI 工具站 `https://roco.gptvip.chat/api/magic-egg-lookup?height_m=...&weight_kg=...`，只传尺寸，不默认指定蛋种。失败后按魔法书 `/egg/search` → `/wiki/pet-size/query`（需 `rocomApiKey`）→ 内置快照回退；成功空结果不回退。备用结果标明主源不可用及数据可能不完整。名称查询使用 `/egg/pet-groups`、`/egg/group-pets`，失败回退本地。单尺寸查询使用本地数据，不请求付费接口。
 - BWIKI 返回的 `match_probability` 为参考概率，`fit_score` 为尺寸匹配度，`confidence_text` 为置信度，三者不得混用。卡片分别展示；接口没有提供尺寸区间时，不使用旧快照补造区间。`scripts/fixtures/bwiki-egg-027-3151.json` 为未指定蛋种的实测响应摘录，含用户提供的13只及诅咒狼灵，共14只；它不等同于同乘蛋池的13只结果。
 - 内置查蛋数据位于 `src/data/egg-data.ts`，来源提交及许可见 `THIRD-PARTY-NOTICES.md`、`LICENSE.egg-data`；构建时打入 JS，无运行时远程下载。本地尺寸匹配度为区间符合程度（范围外15%容差），不是归一化孵出概率。
+- 精灵家族（进化链）数据位于 `src/data/egg-families.ts`，由 `scripts/build-egg-families.cjs` 从上游 `Pets.json` 的 `evolves_from_id` 生成（`node scripts/build-egg-families.cjs [Pets.json 路径]`，省略路径时按固定提交下载）；键为精灵 ID，值为同家族最低阶精灵 ID，仅收录存在进化前身的精灵。上游存在变体互相进化的环，生成时取环上最小 ID。
+- 名称查询默认折叠同家族进化形态，只展示各家族最低阶精灵：本地路径先按家族过滤再按名称去重，避免重名变体挤掉最低阶；魔法书 `/egg/group-pets` 路径按 ID 过滤，ID 对不上内置数据时才退回名称判断，且只对“从不属于最低阶”的名称生效。查询进化形态时会额外提示家族最低阶（`EggCard.familyBase`）。尺寸反查不折叠家族，BWIKI 源本身只返回可孵化的最低阶。
+- 魔法书名称接口 `/egg/pet-groups` 返回的 `height_range_m`/`height_range_cm`/`weight_range_kg`/`weight_range_g` 是精灵体型范围，不是孵化尺寸：实测 `火花` 返回 0.17–0.53m / 7.6–8.5kg，而蛋尺寸为 0.23–0.29m / 2.66–3.4kg。因此名称查询的蛋尺寸只认接口显式 `egg_size`，其余情况一律回退内置快照（并按 ID、旧编号 +3000、名称依次匹配），无法匹配时显示暂无数据，绝不把体型当蛋尺寸；回退时结果标注“蛋尺寸来自内置快照”。`/egg/search`、`/wiki/pet-size/query` 的尺寸反查仍按原顺序读取（`egg_size` → `height_range_m` → `height_range_cm`/`diameterMin`），该路径的区间语义尚未实测确认。
 - `src/services/egg-query.ts` 实现输入解析和数据源回退；`src/render/egg.ts` 生成分页 SVG，复用 Puppeteer 和 outputMode，渲染失败回退文字。
 - 查蛋结果使用结构化 `EggCard`、`EggSection` 渲染双列卡片，每页最多8只；顶部突出输入尺寸，候选显示图标、匹配度和尺寸区间，名称查询显示精灵档案。图标优先使用接口 URL，缺失时按精灵 ID 构造官方图标；发送前经 AssetCache 内联为 data URI，失败时保留文字占位。
+- 精灵图标只对 `3000-3999` 正式编号使用 `game.gtimg.cn/.../jingling/<id>/icon.png`：实测 4xxx、5xxx、8xxx、10xxxx、1300xxxx、1800xxxx 等编号全部 404（如 `嘟嘟煲#18000004`、`恶魔狼#103012`），这些编号改用按名称的 arkmeng 资源，两者都取不到时显示首字占位。正式编号里也有少数未实装精灵（如 3217-3219、3408、3621/3622、3720-3728）没有图标，同样走首字占位。
+- `AssetCache.inlineSvgImages` 会在素材取不到时删除对应的 `<image>` 标签，让卡片底层绘制的首字占位显示出来；否则 SVG 里会留下 404 的远程地址，Puppeteer 截图时画出浏览器的破图图标（2026-02 用户反馈的 `查蛋 阿米亚特` 卡片缺图即此原因）。
+- 内置快照同一名称可能有多条记录（活动/首领/特殊编号），名称查询与候选列表按“有蛋组 + 正式编号”优先取一条，避免命中蛋组为空、图标 404 的重复记录（如 `嘟嘟煲` 取 #3367 而非 #18000004，`恶魔狼` 取 #3011 而非 #103012）；并列时保持原有的后者优先行为。
 
 - 远行商人缓存文件位于 `data/roco-world-merchant/cache.json`。
 - 家园查询状态位于 `data/roco-world-merchant/home-query.json`。

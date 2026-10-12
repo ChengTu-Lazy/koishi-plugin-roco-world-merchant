@@ -108,7 +108,7 @@ function petHeader(pet: EggCard) {
     ${icon(pet, 54, 114, 104)}
     ${text(180, 147, shorten(pet.name, 22), 32, palette.ink, true)}
     ${text(180, 178, `#${pet.id} · ${pet.type || '精灵'} · ${pet.groups || '暂无蛋组数据'}`, 18, palette.muted)}
-    ${text(180, 207, `孵化时长：${pet.hatch || '接口未提供'}`, 16, palette.muted)}
+    ${text(180, 207, `孵化时长：${pet.hatch || '接口未提供'}${pet.familyBase ? ` · 家族最低阶：${pet.familyBase}` : ''}`, 16, palette.muted)}
     ${rangeTile(54, 235, 380, '蛋身高 · m', pet.height.replace(/m$/, ''), 26)}
     ${rangeTile(454, 235, 392, '蛋体重 · kg', pet.weight.replace(/kg$/, ''), 26)}`
 }
@@ -148,7 +148,7 @@ export function renderEggPages(result: EggResult): SvgImage[] {
         : compactCard(pet, 32 + (index % columns) * (cardWidth + gap), gridY + Math.floor(index / columns) * (cardHeight + 16), cardWidth, cardHeight, start + index + 1),
       ).join('')}
       ${empty}
-      ${text(32, height - 55, result.notice || (result.query ? '匹配度表示尺寸符合程度，不代表真实孵出概率。' : '同蛋组精灵可配种，孵蛋结果跟随母体。'), 15, palette.muted)}
+      ${text(32, height - 55, result.notice || (result.query ? '匹配度表示尺寸符合程度，不代表真实孵出概率。' : '同蛋组精灵可配种，孵蛋结果跟随母体；仅展示各家族最低阶形态。'), 15, palette.muted)}
       ${text(32, height - 28, `数据源：${result.source || '查蛋数据'}${result.title === '查蛋候选' ? ' · 请使用完整名称重新查询' : ''}`, 14, palette.muted)}
       </g></svg>` }
   })

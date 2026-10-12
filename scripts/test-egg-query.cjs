@@ -1,10 +1,16 @@
 require('esbuild-register')
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
 const { parseEggQuery, queryLocalEgg, queryEgg } = require('../src/services/egg-query.ts')
 const { renderEggPages, eggResultText } = require('../src/render/egg.ts')
 const { Context } = require('koishi')
 const { eggRows } = require('../src/data/egg-data.ts')
+const { eggFamilyRoots } = require('../src/data/egg-families.ts')
 const { parseBwikiEggResult } = require('../src/sources/egg.ts')
+const { resolvePetIconUrl } = require('../src/sources/pet-icons.ts')
+const { AssetCache } = require('../src/services/asset-cache.ts')
 const bwikiFixture = require('./fixtures/bwiki-egg-027-3151.json')
 
 async function main() {
@@ -20,6 +26,55 @@ async function main() {
   const name = queryLocalEgg({ name: '喵喵' })
   assert.match(eggResultText(name), /蛋组：陆上 \/ 人型/)
   assert.match(eggResultText(name), /0.23–0.31m/)
+  // 家族数据必须自洽：键和最低阶都要在内置精灵里，最低阶自身不能再有进化前身。
+  const rowIds = new Set(eggRows.map(row => row[0]))
+  for (const [id, root] of Object.entries(eggFamilyRoots)) {
+    assert.ok(rowIds.has(Number(id)), `家族数据包含未知精灵 ${id}`)
+    assert.ok(rowIds.has(root), `家族数据缺少最低阶 ${root}`)
+    assert.equal(eggFamilyRoots[root], undefined, `最低阶精灵 ${root} 不应再有进化前身`)
+  }
+  // 名称查询默认折叠同家族进化形态，只展示最低阶。
+  const family = queryLocalEgg({ name: '阿米亚特' })
+  const familyNames = family.sections[0].cards.map(card => card.name)
+  assert.ok(!familyNames.includes('阿米樱'), '同家族进化形态不应出现在候选列表')
+  assert.ok(!familyNames.includes('罗隐'), '同家族进化形态不应出现在候选列表')
+  assert.match(eggResultText(family), /仅最低阶/)
+  assert.match(renderEggPages(family)[0].svg, /仅最低阶/)
+  const evolved = queryLocalEgg({ name: '罗隐' })
+  assert.equal(evolved.pet.familyBase, '阿米亚特 #3014')
+  assert.ok(evolved.sections[0].cards.some(card => card.name === '阿米亚特'), '查询进化形态时应保留家族最低阶')
+  assert.ok(!evolved.sections[0].cards.some(card => card.name === '阿米樱'))
+  assert.match(renderEggPages(evolved)[0].svg, /家族最低阶：阿米亚特 #3014/)
+
+  // 同名重复行取正式编号：嘟嘟煲有 3367 与 18000004 两条，后者蛋组为空且官方图标 404。
+  assert.match(resolvePetIconUrl(3003, '火花'), /jingling\/3003\/icon\.png$/)
+  assert.match(resolvePetIconUrl(18000004, '嘟嘟煲'), /arkmeng\.cn\/.*%E5%98%9F%E5%98%9F%E7%85%B2\.png$/)
+  assert.equal(resolvePetIconUrl(undefined, undefined), undefined)
+  const duplicated = queryLocalEgg({ name: '嘟嘟煲' })
+  assert.equal(duplicated.pet.id, '3367')
+  assert.match(duplicated.pet.icon, /jingling\/3367\/icon\.png$/)
+  const wolf = queryLocalEgg({ name: '恶魔狼' })
+  assert.equal(wolf.pet.id, '3011')
+  assert.ok(wolf.sections[0].total > 0, '正式编号记录应有蛋组与可配种精灵')
+
+  // 图片素材取不到时删除 <image>，保留文字占位，避免卡片画出破图图标。
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'egg-asset-'))
+  const pngBytes = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex')
+  const assetCache = new AssetCache({
+    ctx: { http: { async get(url) {
+      if (url.includes('broken')) throw new Error('模拟 404')
+      return pngBytes.buffer.slice(pngBytes.byteOffset, pngBytes.byteOffset + pngBytes.byteLength)
+    } } },
+    logger: { warn() {} }, config: { requestTimeout: 100 }, cacheDir,
+  })
+  try {
+    const inlined = await assetCache.inlineSvgImages('<svg><image href="https://ok.test/a.png" width="10" height="10"/><text>火</text><image href="https://bad.test/broken.png" width="10" height="10"/></svg>')
+    assert.match(inlined, /data:image\/png;base64,/)
+    assert.doesNotMatch(inlined, /broken\.png|<image[^>]*bad\.test/)
+    assert.match(inlined, /<text>火<\/text>/)
+  } finally {
+    fs.rmSync(cacheDir, { recursive: true, force: true })
+  }
   const size = queryLocalEgg({ height: 0.27, weight: 1.5 })
   assert.match(eggResultText(size), /喵喵 #3001 · 匹配度 100%/)
   const catCard = size.sections.flatMap(section => section.cards).find(card => card.id === '3001')
@@ -107,6 +162,41 @@ async function main() {
   assert.match(offline.notice, /备用数据可能不完整/)
   const malformed = await queryEgg({ http: { async get() { return { data: {} } } } }, config, logger, { name: '喵喵' })
   assert.match(eggResultText(malformed), /喵喵/)
+  // 接口名称查询同样折叠同家族进化形态。
+  const apiName = await queryEgg({ http: { async get(url) {
+    if (url.includes('/egg/pet-groups')) return { code: 0, data: { items: [{ id: 3014, name: '阿米亚特', egg_groups: [{ group_id: 2, official_name: '怪兽' }] }] } }
+    return { code: 0, data: { items: [{ id: 3015, name: '阿米樱' }, { id: 3016, name: '罗隐' }, { id: 3003, name: '火花' }, { id: 3299, name: '蹦蹦种子' }] } }
+  } } }, config, logger, { name: '阿米亚特' })
+  assert.deepEqual(apiName.sections[0].cards.map(card => card.name), ['火花', '蹦蹦种子'])
+  assert.match(eggResultText(apiName), /已折叠同家族进化形态/)
+  assert.equal(apiName.sections[0].cards.find(card => card.name === '火花').height, '0.23–0.29m')
+  const apiEvolved = await queryEgg({ http: { async get(url) {
+    if (url.includes('/egg/pet-groups')) return { code: 0, data: { items: [{ id: 3016, name: '罗隐', egg_groups: [{ group_id: 2, official_name: '怪兽' }] }] } }
+    return { code: 0, data: { items: [{ id: 3014, name: '阿米亚特' }, { id: 3015, name: '阿米樱' }] } }
+  } } }, config, logger, { name: '罗隐' })
+  assert.equal(apiEvolved.pet.familyBase, '阿米亚特 #3014')
+  assert.deepEqual(apiEvolved.sections[0].cards.map(card => card.name), ['阿米亚特'])
+  // 接口的 height_range_m/weight_range_kg 是精灵体型范围，不能当作蛋尺寸展示。
+  const apiBodyRange = await queryEgg({ http: { async get(url) {
+    if (url.includes('/egg/pet-groups')) return { code: 0, data: { items: [{ id: 3003, name: '火花', egg_groups: [{ group_id: 2, official_name: '怪兽' }], height_range_m: [0.17, 0.53], weight_range_kg: [7.6, 8.5] }] } }
+    return { code: 0, data: { items: [] } }
+  } } }, config, logger, { name: '火花' })
+  assert.equal(apiBodyRange.pet.height, '0.23–0.29m')
+  assert.equal(apiBodyRange.pet.weight, '2.66–3.4kg')
+  assert.equal(apiBodyRange.pet.hatch, '12小时')
+  assert.match(eggResultText(apiBodyRange), /蛋身高：0\.23–0\.29m/)
+  assert.match(eggResultText(apiBodyRange), /蛋体重：2\.66–3\.4kg/)
+  assert.doesNotMatch(eggResultText(apiBodyRange), /0\.17|0\.53|7\.6|8\.5/)
+  assert.match(eggResultText(apiBodyRange), /蛋尺寸来自内置快照/)
+  assert.match(apiBodyRange.source, /内置快照/)
+  // 接口明确返回 egg_size 时以接口为准，并去掉内置快照的标注。
+  const apiEggSize = await queryEgg({ http: { async get(url) {
+    if (url.includes('/egg/pet-groups')) return { code: 0, data: { items: [{ id: 3003, name: '火花', egg_groups: [{ group_id: 2 }], egg_size: { height: { min_m: 0.5, max_m: 0.6 }, weight: { min_kg: 5, max_kg: 6 } } }] } }
+    return { code: 0, data: { items: [] } }
+  } } }, config, logger, { name: '火花' })
+  assert.equal(apiEggSize.pet.height, '0.5–0.6m')
+  assert.equal(apiEggSize.pet.weight, '5–6kg')
+  assert.equal(apiEggSize.source, '洛克魔法书')
   const localOnly = await queryEgg({ http: { get() { throw new Error('单尺寸不得请求接口') } } }, config, logger, { weight: 1.5 })
   assert.match(eggResultText(localOnly), /本地快照/)
 
@@ -120,7 +210,7 @@ async function main() {
   const command = app.command('查蛋 [...args:string]')
   const argv = command.parse('0.18 1.5')
   assert.deepEqual(argv.args, ['0.18', '1.5'])
-  console.log('查蛋测试通过：参数、单位、本地数据、匹配度、大小块头、接口回退、成功空集、图标与数字、分页无丢失、转义、Koishi参数解析')
+  console.log('查蛋测试通过：参数、单位、本地数据、匹配度、大小块头、接口回退、成功空集、图标回退与编号、分页无丢失、转义、家族最低阶折叠、素材失败占位、Koishi参数解析')
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1 })
