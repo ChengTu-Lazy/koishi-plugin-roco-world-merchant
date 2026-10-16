@@ -6,6 +6,7 @@ import { callRocomApi } from '../sources/rocom-api'
 import { resolvePetIconUrl } from '../sources/pet-icons'
 import { fetchBwikiEgg } from '../sources/egg'
 import { Config } from '../types'
+import { EggSizeInput, EggSizeRange, findPetEggRow, petDisplayName, sizeClassLabel, sizeClassNotes } from '../utils/egg-size'
 
 const groups = ['未知', '未发现', '怪兽', '两栖', '虫', '飞行', '陆上', '妖精', '植物', '人型', '软体', '矿物', '不定形', '鱼', '龙', '机械']
 export const EGG_USAGE = '查蛋用法：\n查蛋 <精灵名>\n查蛋 0.18 1.5\n查蛋 身高0.18m 体重1.5kg\n身高单位为米，体重单位为千克；也可仅输入身高或“体重1.5kg”。'
@@ -24,6 +25,7 @@ export interface EggCard {
   confidence?: string
   matchLabel?: string
   sizeClass?: string
+  sizeClassNotes?: string[]
   hatch?: string
   familyBase?: string
 }
@@ -38,13 +40,20 @@ export interface EggResult {
   sections?: EggSection[]
 }
 
-function localCard(pet: typeof eggRows[number], weight?: number): EggCard {
+interface EggLabels extends EggSizeRange {
+  height: string
+  weight: string
+  hatch?: string
+}
+
+function localCard(pet: typeof eggRows[number], input: EggSizeInput = {}): EggCard {
   const labels = eggRowLabels(pet)
   return {
     id: String(pet[0]), name: pet[1], icon: resolvePetIconUrl(pet[0], pet[1]),
     type: pet[3], groups: groupNames(pet[4]),
     height: labels.height, weight: labels.weight,
-    sizeClass: sizeClass(weight, pet[7] == null ? undefined : pet[7] / 1000, pet[8] == null ? undefined : pet[8] / 1000).replace(/^ · /, ''),
+    sizeClass: sizeClassLabel(input, labels),
+    sizeClassNotes: sizeClassNotes(labels),
     hatch: labels.hatch,
   }
 }
@@ -65,6 +74,7 @@ function apiNameCard(item: any): EggCard {
     type: Array.isArray(item.unit_type) ? item.unit_type.join(' / ') : undefined,
     groups: Array.isArray(item.egg_groups) ? item.egg_groups.map((group: any) => officialGroupName(group)).filter(Boolean).join(' / ') : undefined,
     height: labels.height, weight: labels.weight, hatch: labels.hatch,
+    sizeClassNotes: sizeClassNotes(labels),
   }
 }
 
@@ -119,7 +129,6 @@ function groupNames(ids: number[]) {
 }
 
 const familyRoots = new Map<number, number>(Object.entries(eggFamilyRoots).map(([id, root]) => [Number(id), Number(root)]))
-const petRows = new Map<number, typeof eggRows[number]>(eggRows.map(row => [row[0], row]))
 const petNames = new Map<number, string>(eggRows.map(row => [row[0], row[1]]))
 const petIds = new Set(petNames.keys())
 // 同名变体既可能是最低阶形态，也可能是进化形态，这类重名不能按名称过滤。
@@ -130,10 +139,6 @@ const evolvedOnlyNames = (() => {
   for (const name of lowest) evolved.delete(name)
   return evolved
 })()
-
-function petName(name: string) {
-  return name.replace(/[（(].*?[)）]/g, '').trim()
-}
 
 /** 返回该精灵所在家族的最低阶精灵 ID；本身已是最低阶或不在内置数据中时返回 undefined。 */
 function familyRootOf(id: unknown) {
@@ -148,7 +153,7 @@ function isLowestStage(id: unknown, name?: string) {
   if (familyRootOf(id) != null) return false
   const value = number(id)
   if (value != null && (petIds.has(value) || petIds.has(value + 3000))) return true
-  return !name || !evolvedOnlyNames.has(petName(name))
+  return !name || !evolvedOnlyNames.has(petDisplayName(name))
 }
 
 function familyBaseLabel(root: number | undefined) {
@@ -180,43 +185,51 @@ function pickCanonicalByName(rows: (typeof eggRows[number])[]) {
 }
 
 /** 内置数据的蛋尺寸与孵化时长，内部为厘米、克，展示为米、千克。 */
-function eggRowLabels(row: typeof eggRows[number]) {
+function eggRowLabels(row: typeof eggRows[number]): EggLabels {
   return {
     height: range(row[5] == null ? null : row[5] / 100, row[6] == null ? null : row[6] / 100, 'm'),
     weight: range(row[7] == null ? null : row[7] / 1000, row[8] == null ? null : row[8] / 1000, 'kg'),
     hatch: row[9] ? `${Number((row[9] / 3600).toFixed(2))}小时` : '暂无数据',
+    heightLow: row[5] == null ? undefined : row[5] / 100,
+    heightHigh: row[6] == null ? undefined : row[6] / 100,
+    weightLow: row[7] == null ? undefined : row[7] / 1000,
+    weightHigh: row[8] == null ? undefined : row[8] / 1000,
   }
-}
-
-function findPetRow(id: unknown, name?: string) {
-  const value = number(id)
-  if (value != null) {
-    const row = petRows.get(value) ?? (value < 3000 ? petRows.get(value + 3000) : undefined)
-    if (row) return row
-  }
-  const key = name ? petName(name) : ''
-  return key ? eggRows.find(row => row[1] === key) : undefined
 }
 
 /**
  * 接口的 height_range_m/weight_range_kg 是精灵体型范围，不是孵化尺寸，
  * 因此名称查询只认显式的 egg_size，其余情况一律回退内置快照，避免把体型当蛋尺寸展示。
  */
-function apiEggSize(item: any) {
+function apiEggSize(item: any): EggLabels | undefined {
   const eggSize = item?.egg_size && typeof item.egg_size === 'object' ? item.egg_size : {}
   const height = eggSize.height && typeof eggSize.height === 'object' ? eggSize.height : {}
   const weight = eggSize.weight && typeof eggSize.weight === 'object' ? eggSize.weight : {}
   const hLow = number(height.min_m), hHigh = number(height.max_m)
   const wLow = number(weight.min_kg), wHigh = number(weight.max_kg)
   if (hLow == null && hHigh == null && wLow == null && wHigh == null) return undefined
-  return { height: range(hLow, hHigh, 'm'), weight: range(wLow, wHigh, 'kg'), hatch: undefined as string | undefined }
+  return {
+    height: range(hLow, hHigh, 'm'), weight: range(wLow, wHigh, 'kg'), hatch: undefined,
+    heightLow: hLow, heightHigh: hHigh, weightLow: wLow, weightHigh: wHigh,
+  }
 }
 
-function apiEggLabels(item: any, id: unknown, name: string) {
+function apiEggLabels(item: any, id: unknown, name: string): EggLabels {
   const direct = apiEggSize(item)
   if (direct) return direct
-  const row = findPetRow(id, name)
-  return row ? eggRowLabels(row) : { height: '暂无数据', weight: '暂无数据', hatch: undefined as string | undefined }
+  const row = findPetEggRow(id, name)
+  return row ? eggRowLabels(row) : { height: '暂无数据', weight: '暂无数据' }
+}
+
+/** 该精灵家族的孵化尺寸区间：自身没有孵化数据时回落到最低阶形态。 */
+function familyEggLabels(row: typeof eggRows[number]) {
+  const own = eggRowLabels(row)
+  if (own.heightLow != null || own.weightLow != null) return { labels: own, from: undefined as string | undefined }
+  const base = findPetEggRow(familyRootOf(row[0]))
+  if (!base) return undefined
+  const labels = eggRowLabels(base)
+  if (labels.heightLow == null && labels.weightLow == null) return undefined
+  return { labels, from: `${base[1]} #${base[0]}` }
 }
 
 function localScore(value: number | undefined, low: number | null, high: number | null) {
@@ -245,12 +258,15 @@ export function queryLocalEgg(query: EggQuery): EggResult {
       .filter(row => !familyRoots.has(row[0])))
     const familyBase = familyBaseLabel(familyRootOf(pet[0]))
     const labels = eggRowLabels(pet)
-    return { title: `查蛋 · ${pet[1]}`, pet: { ...localCard(pet), familyBase }, source: '本地快照', sections: [{ title: pet[4].includes(1) ? '未发现蛋组 · 不能配种' : '同蛋组可配种精灵 · 仅最低阶', total: compatible.length, cards: compatible.slice(0, 30).map(row => localCard(row)) }], lines: [
+    const family = familyEggLabels(pet)
+    const notes = family ? sizeClassNotes(family.labels, family.from) : undefined
+    return { title: `查蛋 · ${pet[1]}`, pet: { ...localCard(pet), familyBase, sizeClassNotes: notes }, source: '本地快照', sections: [{ title: pet[4].includes(1) ? '未发现蛋组 · 不能配种' : '同蛋组可配种精灵 · 仅最低阶', total: compatible.length, cards: compatible.slice(0, 30).map(row => localCard(row)) }], lines: [
       `精灵：${pet[1]} #${pet[0]}　属性：${pet[3] || '未知'}`,
       ...(familyBase ? [`家族最低阶：${familyBase}`] : []),
       `蛋组：${groupNames(pet[4])}`,
       `蛋身高：${labels.height}`,
       `蛋体重：${labels.weight}`,
+      ...(notes || []),
       `孵化时长：${labels.hatch}`,
       pet[4].includes(1) ? '未发现蛋组，不能配种。' : `可配种精灵：${compatible.length}只（同蛋组 · 仅最低阶，已折叠同家族进化形态）`,
       ...compatible.slice(0, 30).map(row => `${row[1]} #${row[0]} · ${groupNames(row[4])}`),
@@ -282,16 +298,17 @@ export function queryLocalEgg(query: EggQuery): EggResult {
   for (const perfect of [true, false]) {
     const matches = candidates.filter(item => item.perfect === perfect)
     if (!matches.length) continue
-    sections.push({ title: perfect ? '完美匹配' : '范围匹配 · 容差15%', total: matches.length, cards: matches.slice(0, 20).map(({ pet, score }) => ({ ...localCard(pet, query.weight), score, matchLabel: perfect ? '完美匹配' : '范围匹配' })) })
+    sections.push({ title: perfect ? '完美匹配' : '范围匹配 · 容差15%', total: matches.length, cards: matches.slice(0, 20).map(({ pet, score }) => ({ ...localCard(pet, query), score, matchLabel: perfect ? '完美匹配' : '范围匹配' })) })
     lines.push(`${perfect ? '完美匹配' : '范围匹配（容差15%）'}：${matches.length}只`)
     for (const { pet, score } of matches.slice(0, 20)) {
-      lines.push(`${pet[1]} #${pet[0]} · 匹配度 ${Number(score.toFixed(2))}%${sizeClass(query.weight, pet[7] == null ? undefined : pet[7] / 1000, pet[8] == null ? undefined : pet[8] / 1000)}`)
+      const label = sizeClassLabel(query, eggRowLabels(pet))
+      lines.push(`${pet[1]} #${pet[0]} · 匹配度 ${Number(score.toFixed(2))}%${label ? ` · ${label}` : ''}`)
       lines.push(`  身高 ${range(pet[5] == null ? null : pet[5] / 100, pet[6] == null ? null : pet[6] / 100, 'm')} / 体重 ${range(pet[7] == null ? null : pet[7] / 1000, pet[8] == null ? null : pet[8] / 1000, 'kg')} · ${groupNames(pet[4])}`)
     }
     if (matches.length > 20) lines.push('该组仅展示前20只。')
   }
   if (!candidates.length) lines.push('未找到符合当前尺寸的精灵。')
-  lines.push('匹配度表示尺寸符合程度，不代表真实孵出概率。', '数据源：本地快照')
+  lines.push('体型判定：小不点与大块头要求身高、体重都进入各自区间的上下 2%。', '匹配度表示尺寸符合程度，不代表真实孵出概率。', '数据源：本地快照')
   return { title: '查蛋 · 尺寸反查', lines, query, sections, source: '本地快照' }
 }
 
@@ -299,12 +316,6 @@ function sizeLabel(query: { height?: number; weight?: number }) {
   return [query.height == null ? '' : `身高 ${query.height}m`, query.weight == null ? '' : `体重 ${query.weight}kg`].filter(Boolean).join(' / ')
 }
 
-function sizeClass(weight?: number, low?: number, high?: number) {
-  if (weight == null || low == null || high == null || high <= low || weight < low || weight > high) return ''
-  if (weight <= low + (high - low) * 0.05) return ' · 小块头'
-  if (weight >= high - (high - low) * 0.05) return ' · 大块头'
-  return ''
-}
 
 function apiItems(response: any): any[] {
   if (Array.isArray(response)) return response
@@ -337,6 +348,8 @@ function apiSizeResult(response: any, query: { height?: number; weight?: number 
     const info = item.match?.match_percent_text || (percent == null ? '' : `匹配度 ${percent}%`)
     const id = pet.pet_id || pet.id || item.petId || '-'
     const section = sections[perfect ? 0 : 1]
+    const sizeRange: EggSizeRange = { heightLow: hLow, heightHigh: hHigh, weightLow: wLow, weightHigh: wHigh }
+    const classLabel = sizeClassLabel(query, sizeRange)
     section.total++
     section.cards.push({
       id: String(id), name: `${name}${form}`, icon: apiIcon({ ...item, ...pet }, id, name),
@@ -344,12 +357,13 @@ function apiSizeResult(response: any, query: { height?: number; weight?: number 
       groups: Array.isArray(pet.egg_group_names) ? pet.egg_group_names.join(' / ') : undefined,
       height: range(hLow, hHigh, 'm'), weight: range(wLow, wHigh, 'kg'), score: percent,
       matchLabel: info || (number(item.r_value) == null ? '尺寸命中' : `R值 ${item.r_value}`),
-      sizeClass: sizeClass(query.weight, wLow, wHigh).replace(/^ · /, ''),
+      sizeClass: classLabel,
+      sizeClassNotes: sizeClassNotes(sizeRange),
     })
-    lines.push(`${name}${form} #${pet.pet_id || pet.id || item.petId || '-'} · ${perfect ? '完美匹配' : '范围匹配'}${info ? ` · ${info}` : ''}${sizeClass(query.weight, wLow, wHigh)}`)
-    lines.push(`  身高 ${range(hLow, hHigh, 'm')} / 体重 ${range(wLow, wHigh, 'kg')}${number(item.r_value) == null ? '' : ` · R值 ${item.r_value}`}`)
+    lines.push(`${name}${form} #${pet.pet_id || pet.id || item.petId || '-'} · ${perfect ? '完美匹配' : '范围匹配'}${info ? ` · ${info}` : ''}${classLabel ? ` · ${classLabel}` : ''}`)
+    lines.push(`  身高 ${range(hLow, hHigh, 'm')} / 体重 ${range(wLow, wHigh, 'kg')}${number(item.r_value) == null ? '' : ` · R值 ${item.r_value}`}${classLabel ? ` · ${classLabel}` : ''}`)
   }
-  lines.push('接口结果仅展示当前页，最多30条。', '匹配度供参考，不代表真实孵出概率。', '数据源：洛克魔法书')
+  lines.push('接口结果仅展示当前页，最多30条。', '体型判定：小不点与大块头要求身高、体重都进入各自区间的上下 2%。', '匹配度供参考，不代表真实孵出概率。', '数据源：洛克魔法书')
   return { title: '查蛋 · 尺寸反查', lines, query, sections: sections.filter(section => section.total), source: '洛克魔法书 · 当前页最多30条' }
 }
 
@@ -393,11 +407,19 @@ export async function queryEgg(ctx: Context, config: Config, logger: Logger, que
         const labels = eggGroups.map((group: any) => officialGroupName(group)).filter(Boolean)
         const sections: EggSection[] = []
         const familyBase = familyBaseLabel(familyRootOf(pet.id ?? pet.pet_id))
-        const petCard = { ...apiNameCard(pet), familyBase }
+        const apiCard = apiNameCard(pet)
+        const localRow = apiEggSize(pet) ? undefined : findPetEggRow(pet.id ?? pet.pet_id, String(pet.name || ''))
+        const family = localRow ? familyEggLabels(localRow) : undefined
+        const petCard = {
+          ...apiCard,
+          familyBase,
+          sizeClassNotes: apiCard.sizeClassNotes ?? (family ? sizeClassNotes(family.labels, family.from) : undefined),
+        }
         const snapshotSize = !apiEggSize(pet)
         const lines = [`精灵：${pet.name} #${pet.id || pet.pet_id || '-'}`, ...(familyBase ? [`家族最低阶：${familyBase}`] : []), `蛋组：${labels.join(' / ') || '暂无数据'}`,
           `蛋身高：${petCard.height}`,
           `蛋体重：${petCard.weight}`,
+          ...(petCard.sizeClassNotes || []),
           `孵化时长：${petCard.hatch || '接口未提供'}`]
         if (ids.includes(1) || labels.some((label: string) => label.includes('未发现'))) lines.push('未发现蛋组，不能配种。')
         else if (ids.length) {

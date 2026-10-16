@@ -11,6 +11,7 @@ const { eggFamilyRoots } = require('../src/data/egg-families.ts')
 const { parseBwikiEggResult } = require('../src/sources/egg.ts')
 const { resolvePetIconUrl } = require('../src/sources/pet-icons.ts')
 const { AssetCache } = require('../src/services/asset-cache.ts')
+const { sizeClassLabel, sizeClassNotes, petEggSizeRange } = require('../src/utils/egg-size.ts')
 const bwikiFixture = require('./fixtures/bwiki-egg-027-3151.json')
 
 async function main() {
@@ -98,8 +99,57 @@ async function main() {
   } finally {
     eggRows.pop()
   }
-  assert.match(eggResultText(queryLocalEgg({ height: 0.27, weight: 1.27 })), /喵喵 #3001[^\n]*小块头/)
+  // 体型判定：小不点/大块头要求身高与体重同时进入各自区间的上下 2%。
+  // 火花 身高 0.23–0.29m / 体重 2.66–3.4kg → 身高 0.2312m、体重 2.6748kg 为下限门槛。
+  assert.match(eggResultText(queryLocalEgg({ height: 0.23, weight: 1.27 })), /喵喵 #3001[^\n]*小不点/)
+  assert.match(eggResultText(queryLocalEgg({ weight: 1.27 })), /喵喵 #3001[^\n]*小不点（仅按体重）/)
   assert.match(eggResultText(queryLocalEgg({ height: 9999, weight: 9999 })), /未找到/)
+  const sparkText = eggResultText(queryLocalEgg({ name: '火花' }))
+  assert.match(sparkText, /蛋体重：2\.66–3\.4kg/)
+  assert.match(sparkText, /体型判定（身高、体重都要进各自区间 2%）/)
+  assert.match(sparkText, /小不点 身高 ≤0\.231m 且 体重 ≤2\.674kg ｜ 大块头 身高 ≥0\.289m 且 体重 ≥3\.386kg/)
+  const sparkSvg = renderEggPages(queryLocalEgg({ name: '火花' }))[0].svg
+  assert.match(sparkSvg, /身高 ≤0\.231m 且 体重 ≤2\.674kg/)
+  assert.match(sparkSvg, /身高 ≥0\.289m 且 体重 ≥3\.386kg/)
+  // 进化形态没有自己的孵化数据，判定区间回落到家族最低阶形态。
+  assert.match(eggResultText(queryLocalEgg({ name: '罗隐' })), /体型判定（身高、体重都要进各自区间 2% · 最低阶 阿米亚特 #3014）/)
+  assert.match(eggResultText(queryLocalEgg({ name: '罗隐' })), /大块头 身高 ≥0\.329m 且 体重 ≥19\.556kg/)
+  const classify = (height, weight) => queryLocalEgg({ height, weight }).sections.flatMap(section => section.cards).find(card => card.name === '火花')
+  // 只有身高或只有体重到边缘时都不是极限体型，必须两者同时达标（与洛克工具箱 height_edge_hint 一致）。
+  assert.equal(classify(0.29, 3.39).sizeClass, '大块头')
+  assert.equal(classify(0.23, 2.67).sizeClass, '小不点')
+  assert.equal(classify(0.25, 3.39).sizeClass, '')
+  assert.equal(classify(0.29, 3.0).sizeClass, '')
+  assert.equal(classify(0.29, 3.38).sizeClass, '')
+  assert.equal(classify(0.23, 2.68).sizeClass, '')
+  assert.deepEqual(classify(0.29, 3.39).sizeClassNotes, [
+    '体型判定（身高、体重都要进各自区间 2%）',
+    '小不点 身高 ≤0.231m 且 体重 ≤2.674kg ｜ 大块头 身高 ≥0.289m 且 体重 ≥3.386kg',
+  ])
+  assert.match(renderEggPages(queryLocalEgg({ height: 0.29, weight: 3.39 })).map(page => page.svg).join(''), /大块头/)
+
+  // 工具箱与文章交叉验证：罗隐 13.475–19.68kg 的门槛应算出文章里的 >19.556（真实门槛 19.5559）。
+  const luoyinNotes = sizeClassNotes({ weightLow: 13.475, weightHigh: 19.68 })
+  assert.match(luoyinNotes[1], /小不点 体重 ≤13\.599kg ｜ 大块头 体重 ≥19\.556kg/)
+  const luoyinRange = { weightLow: 13.475, weightHigh: 19.68 }
+  assert.equal(sizeClassLabel({ weight: 19.556 }, luoyinRange), '大块头（仅按体重）')
+  assert.equal(sizeClassLabel({ weight: 19.555 }, luoyinRange), '')
+  assert.equal(sizeClassLabel({ weight: 13.599 }, luoyinRange), '小不点（仅按体重）')
+  assert.equal(sizeClassLabel({ weight: 13.6 }, luoyinRange), '')
+  assert.deepEqual(petEggSizeRange(3003), { heightLow: 0.23, heightHigh: 0.29, weightLow: 2.66, weightHigh: 3.4 })
+  assert.equal(petEggSizeRange(999999), undefined)
+  // BWIKI 源不给尺寸区间，用内置快照推算体型：身高 0.29m + 体重 3.39kg 才是火花的大块头。
+  const bwikiClass = parseBwikiEggResult(bwikiFixture, { height: 0.29, weight: 3.39 })
+  const bwikiSpark = bwikiClass.sections[0].cards.find(card => card.name === '火花')
+  assert.equal(bwikiSpark.sizeClass, '大块头')
+  assert.deepEqual(bwikiSpark.sizeClassNotes, [
+    '体型判定（身高、体重都要进各自区间 2%）',
+    '小不点 身高 ≤0.231m 且 体重 ≤2.674kg ｜ 大块头 身高 ≥0.289m 且 体重 ≥3.386kg',
+  ])
+  assert.match(renderEggPages(bwikiClass).map(page => page.svg).join(''), /大块头/)
+  // 只有体重到边缘、身高在中间时不算大块头。
+  assert.equal(parseBwikiEggResult(bwikiFixture, { height: 0.25, weight: 3.39 }).sections[0].cards.find(card => card.name === '火花').sizeClass, '')
+  assert.equal(parseBwikiEggResult(bwikiFixture, { height: 0.29, weight: 3.38 }).sections[0].cards.find(card => card.name === '火花').sizeClass, '')
 
   const config = { rocomApiKey: 'test-only', rocomApiBaseUrl: 'https://example.invalid', requestTimeout: 100 }
   const logger = { warn() {} }
@@ -210,7 +260,7 @@ async function main() {
   const command = app.command('查蛋 [...args:string]')
   const argv = command.parse('0.18 1.5')
   assert.deepEqual(argv.args, ['0.18', '1.5'])
-  console.log('查蛋测试通过：参数、单位、本地数据、匹配度、大小块头、接口回退、成功空集、图标回退与编号、分页无丢失、转义、家族最低阶折叠、素材失败占位、Koishi参数解析')
+  console.log('查蛋测试通过：参数、单位、本地数据、匹配度、小不点大块头判定、接口回退、成功空集、图标回退与编号、分页无丢失、转义、家族最低阶折叠、素材失败占位、Koishi参数解析')
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1 })

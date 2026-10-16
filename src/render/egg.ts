@@ -86,6 +86,7 @@ function compactCard(pet: EggCard, x: number, y: number, width: number, height: 
   const titleMax = width >= 300 ? 11 : width >= 250 ? 9 : 7
   const typeMax = width >= 300 ? 15 : 10
   const bar = score == null ? '' : `<rect x="${x + 14}" y="${y + 100}" width="${barWidth}" height="5" rx="2.5" fill="#e7ede4"/><rect x="${x + 14}" y="${y + 100}" width="${barWidth * Math.max(0, Math.min(100, score)) / 100}" height="5" rx="2.5" fill="${palette.green}"/>`
+  const footer = `${pet.matchLabel || '尺寸命中'}${pet.sizeClass ? ` · ${pet.sizeClass}` : ''}`
   return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="16" fill="#ffffff" stroke="${palette.border}"/>
     ${icon(pet, x + 14, y + 14, iconSize)}
     ${text(x + 14, y + iconSize + 38, shorten(pet.name, titleMax), width >= 300 ? 19 : 16, palette.ink, true)}
@@ -93,7 +94,7 @@ function compactCard(pet: EggCard, x: number, y: number, width: number, height: 
     <text x="${x + width - 14}" y="${y + 34}" text-anchor="end" font-size="${width >= 300 ? 23 : 19}" fill="${palette.green}" font-weight="700">${escapeXml(scoreText)}</text>
     ${score == null ? '' : text(x + width - 14, y + 53, pet.scoreLabel || '参考概率', 11, palette.muted)}
     ${bar}
-    ${text(x + 14, y + height - 20, shorten(pet.matchLabel || '尺寸命中', width >= 300 ? 13 : 9), 12, palette.muted)}
+    ${text(x + 14, y + height - 20, shorten(footer, width >= 300 ? 16 : 13), 12, palette.muted)}
     <circle cx="${x + 25}" cy="${y + 25}" r="11" fill="${palette.green}"/>${text(x + (rank < 10 ? 21 : 17), y + 29, String(rank), 11, '#ffffff', true)}`
 }
 
@@ -104,13 +105,15 @@ function queryHeader(result: EggResult) {
 }
 
 function petHeader(pet: EggCard) {
-  return `<rect x="32" y="95" width="836" height="222" rx="22" fill="#ffffff" stroke="${palette.border}"/>
+  const notes = pet.sizeClassNotes || []
+  return `<rect x="32" y="95" width="836" height="${notes.length ? 246 : 222}" rx="22" fill="#ffffff" stroke="${palette.border}"/>
     ${icon(pet, 54, 114, 104)}
     ${text(180, 147, shorten(pet.name, 22), 32, palette.ink, true)}
     ${text(180, 178, `#${pet.id} · ${pet.type || '精灵'} · ${pet.groups || '暂无蛋组数据'}`, 18, palette.muted)}
     ${text(180, 207, `孵化时长：${pet.hatch || '接口未提供'}${pet.familyBase ? ` · 家族最低阶：${pet.familyBase}` : ''}`, 16, palette.muted)}
     ${rangeTile(54, 235, 380, '蛋身高 · m', pet.height.replace(/m$/, ''), 26)}
-    ${rangeTile(454, 235, 392, '蛋体重 · kg', pet.weight.replace(/kg$/, ''), 26)}`
+    ${rangeTile(454, 235, 392, '蛋体重 · kg', pet.weight.replace(/kg$/, ''), 26)}
+    ${notes.map((note, index) => text(54, 311 + index * 18, note, index ? 13 : 14, palette.muted)).join('')}`
 }
 
 export function renderEggPages(result: EggResult): SvgImage[] {
@@ -129,7 +132,7 @@ export function renderEggPages(result: EggResult): SvgImage[] {
   }
   if (!chunks.length) chunks.push({ section: { title: result.pet ? '暂无可配种精灵' : '未找到匹配精灵', total: 0, cards: [] }, cards: [], start: 0 })
   return chunks.map(({ section, cards, start }, page) => {
-    const sectionY = result.pet ? 360 : result.query ? 240 : 120
+    const sectionY = result.pet ? (result.pet.sizeClassNotes?.length ? 384 : 360) : result.query ? 240 : 120
     const gridY = sectionY + 26
     const height = gridY + Math.max(1, Math.ceil(cards.length / columns)) * (cardHeight + 16) + 95
     const notice = section.cards.length < section.total ? `已展示 ${section.cards.length} / ${section.total} 只` : `${section.total} 只候选`

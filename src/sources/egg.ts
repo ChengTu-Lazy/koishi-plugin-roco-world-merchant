@@ -2,6 +2,7 @@ import { Context } from 'koishi'
 
 import type { EggCard, EggResult } from '../services/egg-query'
 import { Config } from '../types'
+import { petEggSizeRange, sizeClassLabel, sizeClassNotes } from '../utils/egg-size'
 import { resolvePetIconUrl } from './pet-icons'
 
 const EGG_LOOKUP_URL = 'https://roco.gptvip.chat/api/magic-egg-lookup'
@@ -34,22 +35,27 @@ export function parseBwikiEggResult(response: unknown, query: { height: number; 
     const icon = typeof suppliedIcon === 'string' && /^https?:\/\//i.test(suppliedIcon)
       ? suppliedIcon : resolvePetIconUrl(Number(id) || undefined, name)
     if (isNonBreedingPet(name)) return null
+    // 接口只给参考概率，不给尺寸区间；体型判定用内置快照的蛋尺寸区间推算，缺失时不标。
+    const sizeRange = petEggSizeRange(id, name)
+    const classLabel = sizeRange ? sizeClassLabel(query, sizeRange) : ''
     return {
       id, name, icon, type: String(preview.type_name || '').replace(/元素精灵/g, '').replace(/,\s*/g, ' / '),
       height: '接口未提供', weight: '接口未提供',
       score: percentage(item.match_probability), scoreLabel: '参考概率',
       fitScore: percentage(item.fit_score), confidence: String(item.confidence_text || '未提供'),
       matchLabel: String(item.same_ride_label || '尺寸命中'),
+      sizeClass: classLabel,
+      sizeClassNotes: sizeClassNotes(sizeRange ?? {}),
     }
   }).filter(Boolean) as EggCard[]
   const lines = [`身高 ${query.height}m / 体重 ${query.weight}kg`, `匹配候选：${cards.length}只`]
   cards.forEach((card, index) => lines.push(
-    `${index + 1}. ${card.name} #${card.id} · 参考概率 ${card.score == null ? '未提供' : `${card.score}%`}`,
+    `${index + 1}. ${card.name} #${card.id} · 参考概率 ${card.score == null ? '未提供' : `${card.score}%`}${card.sizeClass ? ` · ${card.sizeClass}` : ''}`,
     `  ${card.matchLabel === '尺寸命中' ? '尺寸命中' : card.matchLabel}`,
   ))
   if (!cards.length) lines.push('未找到符合当前尺寸的精灵。')
   const notice = '参考概率来自数据源估算，不代表实际孵出概率。'
-  lines.push(notice, '数据源：BWIKI 工具站')
+  lines.push(notice, '体型判定：小不点与大块头要求身高、体重都进入各自区间的上下 2%。', '数据源：BWIKI 工具站')
   return {
     title: '查蛋 · 尺寸反查', query, lines, source: 'BWIKI 工具站', notice,
     sections: [{ title: '匹配候选', total: cards.length, cards }],
